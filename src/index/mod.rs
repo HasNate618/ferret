@@ -596,8 +596,9 @@ fn process_pdf_page(
 
 /// PDF file-error path: upsert the row with `complete=0`, the sticky
 /// cursor, and the message; emit the NDJSON error event; bump errors.
-/// Unlike `record_extract_error` this preserves `next_page` (resume),
-/// and unlike walk-skips the row stays (spec §4.4).
+/// Unlike `record_extract_error` this preserves `next_page` (resume) AND
+/// keeps already-committed page chunks (spec §9 partial-file): only the
+/// files row is upserted, never wiped.
 #[allow(clippy::too_many_arguments)]
 fn record_pdf_error(
     store: &Store,
@@ -624,7 +625,8 @@ fn record_pdf_error(
         })
         .unwrap_or((0, 0));
     let file_fp = fingerprint::file_fingerprint(path_str, mtime, size, config_fp);
-    store.delete_file_by_path(path_str)?;
+    // No delete: committed pages stay (spec §9); the upsert below only
+    // touches the files row (cursor, error, fingerprint).
     store.upsert_file(&NewFile {
         path: path_str.to_string(),
         collection: collection.to_string(),

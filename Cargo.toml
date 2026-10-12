@@ -10,5 +10,9 @@ default-run = "ferret"
 [dependencies]
 thiserror = "2"
 dirs = "6"
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+serde_json = "1"
 
 [dev-dependencies]
+tempfile = "3"

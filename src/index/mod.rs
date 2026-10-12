@@ -389,7 +389,19 @@ fn index_file(
             });
         }
     }
-    let vectors = embedder.embed_batch(&inputs)?;
+    // --- embed phase ----------------------------------------------------
+    // A file-scoped embed failure (e.g. the server 4xx'd one chunk) is a
+    // per-file error row, not a fatal abort; transport/5xx still propagate.
+    let vectors = match embedder.embed_batch(&inputs) {
+        Ok(vectors) => vectors,
+        Err(e) if e.is_file_error() => {
+            record_extract_error(
+                store, &mut sink, &path, &collection, kind, &ext, config_fp, e, summary, false,
+            );
+            return Ok(());
+        }
+        Err(e) => return Err(e),
+    };
 
     // --- write phase: one transaction ------------------------------------
     // The collection is vec metadata, so it is kept out of `NewFile`'s move.

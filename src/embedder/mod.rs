@@ -1,12 +1,16 @@
 //! Embedder front end: typed inputs, the `Embedder` trait, L2
 //! normalization / dimension enforcement, and `build_embedder` with the
-//! `FERRET_EMBEDDER=fake` test hook. HTTP backends land with Task 12; until
-//! then only the fake embedder can be built.
+//! `FERRET_EMBEDDER=fake` test hook. HTTP backends are served by
+//! [`HttpEmbedder`] (Task 12); `openai` / `sglang` construct but their
+//! `embed` stays fatal until Task 16.
 
 pub mod fake;
+pub mod http;
 pub mod prefix;
+pub mod probe;
 
 pub use fake::FakeEmbedder;
+pub use http::HttpEmbedder;
 pub use prefix::apply_prefix;
 
 use crate::config::Config;
@@ -40,8 +44,9 @@ pub trait Embedder: Send + Sync {
 
 /// Build the embedder for the merged config. `FERRET_EMBEDDER=fake` wins over
 /// `embedder.backend` (any backend) and the fake reports
-/// `images_supported = true`. Without the fake hook this is fatal until the
-/// HTTP backends land (Task 12).
+/// `images_supported = true`. Otherwise an [`HttpEmbedder`] is built and
+/// health-checked (spawning the managed server first when configured): a
+/// down embedder is fatal here, before any file is touched.
 pub fn build_embedder(
     cfg: &Config,
     env: &dyn Fn(&str) -> Option<String>,
@@ -52,7 +57,9 @@ pub fn build_embedder(
             cfg.embedder.dimensions,
         )));
     }
-    Err(Error::fatal("http embedder not implemented"))
+    let http = HttpEmbedder::new(cfg)?;
+    http.check_health()?;
+    Ok(Box::new(http))
 }
 
 /// L2-normalize `v`. Any non-finite component, or a zero norm, is an error:

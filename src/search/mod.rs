@@ -113,10 +113,19 @@ pub fn run_search(
     let mut fn_scores: HashMap<i64, f64> = HashMap::new();
 
     if want_vec {
-        let query_vec = embedder.embed(EmbedInput::Query {
-            text: semantic,
-            task: parsed.task,
-        })?;
+        // A file-scoped error makes no sense for a query: escalate to fatal.
+        let query_vec = embedder
+            .embed(EmbedInput::Query {
+                text: semantic,
+                task: parsed.task,
+            })
+            .map_err(|e| {
+                if e.is_file_error() {
+                    Error::fatal(e.to_string())
+                } else {
+                    e
+                }
+            })?;
         for (i, row) in sql::vec_arm(conn, &query_vec, &filters, candidates)?
             .into_iter()
             .enumerate()

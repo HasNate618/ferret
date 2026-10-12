@@ -37,14 +37,20 @@ fn build_embedder_fake_env_wins_over_any_backend() {
 }
 
 #[test]
-fn build_embedder_without_fake_is_fatal_until_task_12() {
+fn build_embedder_without_fake_health_checks() {
+    // No fake hook and the default endpoint has no server: build fails
+    // with a fatal error naming the endpoint (Task 12 replaced the
+    // "not implemented" stub with a health-checked HttpEmbedder).
     let tmp = tempfile::tempdir().unwrap();
     let cfg = compiled_defaults(&test_dirs(tmp.path()));
     let err = match build_embedder(&cfg, &no_env) {
         Err(err) => err,
-        Ok(_) => panic!("expected fatal error without the fake hook"),
+        Ok(_) => panic!("expected fatal error with no server up"),
     };
-    assert_eq!(err.to_string(), "http embedder not implemented");
+    assert!(
+        err.to_string().contains(&cfg.embedder.endpoint),
+        "health error must name the endpoint: {err}"
+    );
 }
 
 #[test]

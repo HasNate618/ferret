@@ -3,7 +3,8 @@
 //! never stacks) → `./.ferret.toml` → `FERRET__SECTION__KEY` env → `--index`.
 //!
 //! All config errors are `Error::fatal` (exit 1). `FERRET_EMBEDDER` is a
-//! special test hook handled elsewhere (Task 6), never here.
+//! special test hook read by `embedder::build_embedder` via its `env`
+//! parameter, never here.
 
 use crate::error::{Error, Result};
 use crate::paths::{ferret_dirs, FerretDirs, INDEX_FILENAME};

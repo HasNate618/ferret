@@ -4,6 +4,7 @@ pub mod embedder;
 pub mod error;
 pub mod extract;
 pub mod fingerprint;
+pub mod index;
 pub mod paths;
 pub mod search;
 pub mod store;

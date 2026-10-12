@@ -22,7 +22,7 @@ use crate::extract::{self, Chunk, EmbedDecision};
 use crate::fingerprint;
 use crate::paths::ferret_dirs;
 use crate::store::{self, NewChunk, NewFile, Store};
-use crate::types::{Backend, FileKind};
+use crate::types::{FileKind, HeicMode};
 
 /// Index run counters (stderr summary: seen / skipped / embedded / errors).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -59,13 +59,6 @@ pub fn run(
     // invalidates, so per-file re-extraction has a clean slate while the
     // other side's vec rows survive.
     apply_pipeline_changes(&store, cfg, images_supported, &config_fp)?;
-
-    if matches!(cfg.embedder.backend, Backend::Openai | Backend::Sglang) {
-        eprintln!(
-            "warning: backend `{}` uploads file content to {}",
-            cfg.embedder.backend, cfg.embedder.endpoint
-        );
-    }
 
     let dirs = ferret_dirs(&|k| std::env::var(k).ok());
     let mut summary = IndexSummary::default();
@@ -112,12 +105,17 @@ pub fn run(
     }
 
     // Record the fingerprints this run was built with (also when zero files
-    // were walked, so the next run knows a reindex is not pending).
+    // were walked, so the next run knows a reindex is not pending), plus
+    // the image capability `status` reports without an embedder call.
     store.set_meta("config_fingerprint", &config_fp)?;
     store.set_meta("text_pipeline", &fingerprint::text_pipeline_json(cfg))?;
     store.set_meta(
         "image_pipeline",
         &fingerprint::image_pipeline_json(cfg, images_supported),
+    )?;
+    store.set_meta(
+        "images_supported",
+        if images_supported { "true" } else { "false" },
     )?;
 
     if strict && summary.errors > 0 {
@@ -271,8 +269,26 @@ fn index_file(
     ext: String,
     summary: &mut IndexSummary,
 ) -> Result<()> {
-    let _ = images_supported;
     let path_str = path.to_string_lossy().into_owned();
+    // Capability skips: the walk does not know the embedder, so an image
+    // file no backend can embed (and HEIC with no converter) is skipped
+    // here with its NDJSON reason, deleting any existing rows. This is a
+    // skip, not an error (spec §9).
+    if kind == FileKind::Image && !images_supported {
+        store.delete_file_by_path(&path_str)?;
+        summary.skipped += 1;
+        emit_skip(sink.json, &path, SkipReason::NoImageBackend, &mut *sink.out)?;
+        return Ok(());
+    }
+    if matches!(ext.to_ascii_lowercase().as_str(), "heic" | "heif")
+        && matches!(cfg.files.heic, HeicMode::Magick)
+        && !has_magick()
+    {
+        store.delete_file_by_path(&path_str)?;
+        summary.skipped += 1;
+        emit_skip(sink.json, &path, SkipReason::NoMagick, &mut *sink.out)?;
+        return Ok(());
+    }
     let metadata = match std::fs::metadata(&path) {
         Ok(md) => md,
         Err(e) => {
@@ -509,6 +525,30 @@ fn record_extract_error(
         error: Some(message),
     };
     let _ = store.upsert_file(&row);
+}
+
+/// True when a `magick` or `convert` executable is on PATH (HEIC `"magick"`
+/// mode needs one; Task 14 owns the actual conversion).
+fn has_magick() -> bool {
+    std::env::var_os("PATH").is_some_and(|paths| {
+        std::env::split_paths(&paths).any(|dir| {
+            ["magick", "convert"].iter().any(|bin| {
+                let candidate = dir.join(bin);
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    candidate.is_file()
+                        && candidate
+                            .metadata()
+                            .is_ok_and(|m| m.permissions().mode() & 0o111 != 0)
+                }
+                #[cfg(not(unix))]
+                {
+                    candidate.is_file()
+                }
+            })
+        })
+    })
 }
 
 fn now_unix() -> i64 {

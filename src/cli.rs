@@ -10,14 +10,14 @@
 //! validation, and `rm` / `gc` are usage-ok no-ops. `search` runs the
 //! hybrid pipeline (Task 8).
 
-use crate::config::{self, LayerSource, LoadOpts};
+use crate::config::{self, Config, LayerSource, LoadOpts};
 use crate::embedder;
 use crate::error::{Error, Result};
 use crate::index;
 use crate::paths::ferret_dirs;
 use crate::search::{self, FilterFlags, SearchRequest};
 use crate::store;
-use crate::types::{FileKind, SearchMode};
+use crate::types::{Backend, FileKind, SearchMode};
 use clap::{Parser, Subcommand};
 use std::collections::BTreeSet;
 use std::io::{IsTerminal, Write};
@@ -189,7 +189,7 @@ fn execute(
     stdin: &mut dyn std::io::BufRead,
     is_tty: bool,
     stdout: &mut dyn Write,
-    _stderr: &mut dyn Write,
+    stderr: &mut dyn Write,
 ) -> Result<()> {
     let cli = match Cli::try_parse_from(args) {
         Ok(cli) => cli,
@@ -211,20 +211,22 @@ fn execute(
     };
 
     match cli.command {
-        Command::Init { roots, force } => init(&roots, force, stdout),
+        Command::Init { roots, force } => init(&opts, &roots, force, stdout, stderr),
         Command::Config { command } => match command {
             ConfigCmd::Show => config_show(&opts, stdout),
             ConfigCmd::Path => config_path(&opts, stdout),
         },
         Command::Index { paths, json, strict } => {
             let cfg = config::load(&opts)?;
+            upload_warning(&cfg, stderr);
             let embedder = embedder::build_embedder(&cfg, &|k| std::env::var(k).ok())?;
             let summary = index::run(&cfg, embedder.as_ref(), paths, json, strict, stdout)?;
             if !json {
-                eprintln!(
+                writeln!(
+                    stderr,
                     "indexed: {} seen, {} skipped, {} embedded, {} errors",
                     summary.seen, summary.skipped, summary.embedded, summary.errors
-                );
+                )?;
             }
             Ok(())
         }
@@ -232,13 +234,20 @@ fn execute(
             let cfg = config::load(&opts)?;
             let store = store::open(&cfg.index.path, &cfg, true)?;
             let c = store.status_counts()?;
+            // `status` never calls the embedder: the last `index` run
+            // recorded its probe result in meta; without one, only openai
+            // is known-text-only.
+            let images_supported = match store.get_meta("images_supported")? {
+                Some(v) => v == "true",
+                None => !matches!(cfg.embedder.backend, Backend::Openai),
+            };
             if json {
                 let out = serde_json::json!({
                     "index": cfg.index.path.to_string_lossy(),
                     "model_id": cfg.embedder.model,
                     "dimensions": cfg.embedder.dimensions,
                     "backend": cfg.embedder.backend.to_string(),
-                    "images_supported": true,
+                    "images_supported": images_supported,
                     "files": {
                         "text": c.files_text,
                         "image": c.files_image,
@@ -261,8 +270,8 @@ fn execute(
             }
             Ok(())
         }
-        Command::Gc => Ok(()),        // stub; Task 13 fills this in
-        Command::Rm { .. } => Ok(()), // stub; Task 13 fills this in
+        Command::Gc => cmd_gc(&opts, stderr),
+        Command::Rm { paths } => cmd_rm(&opts, &paths, stderr),
         Command::Search {
             query,
             kind,
@@ -422,7 +431,16 @@ fn split_strings(values: &[String]) -> Vec<String> {
 /// `roots` from `--root`. Never writes `api_key` or `multimodal`; never
 /// contacts the network. Existing file: usage error (exit 2) unless
 /// `--force`. Two roots whose collection names collide: fatal (exit 1).
-fn init(roots: &[PathBuf], force: bool, stdout: &mut dyn Write) -> Result<()> {
+/// `ferret init`: write the starter config, then warn about uploads when
+/// the MERGED backend is remote (spec §7). Init itself never contacts the
+/// network; a broken config layer only suppresses the warning, not init.
+fn init(
+    opts: &LoadOpts,
+    roots: &[PathBuf],
+    force: bool,
+    stdout: &mut dyn Write,
+    stderr: &mut dyn Write,
+) -> Result<()> {
     let dirs = ferret_dirs(&|k| std::env::var(k).ok());
 
     // Collection = last component of the canonical root; unique.
@@ -478,7 +496,83 @@ fn init(roots: &[PathBuf], force: bool, stdout: &mut dyn Write) -> Result<()> {
     std::fs::write(&file, body)?;
 
     writeln!(stdout, "wrote {}", file.display())?;
+    if let Ok(cfg) = config::load(opts) {
+        upload_warning(&cfg, stderr);
+    }
     Ok(())
+}
+
+/// Remote backends upload file bytes to someone else's computer; local
+/// ones only talk to `embedder.endpoint`. One line on stderr (spec §7).
+fn upload_warning(cfg: &Config, stderr: &mut dyn Write) {
+    if matches!(cfg.embedder.backend, Backend::Openai | Backend::Sglang) {
+        let _ = writeln!(
+            stderr,
+            "warning: backend `{}` uploads file content to {} (extracted text/image bytes leave this machine)",
+            cfg.embedder.backend, cfg.embedder.endpoint
+        );
+    }
+}
+
+/// `ferret rm PATH...`: delete file rows when present (chunks cascade;
+/// vec/fts rows go via `delete_file_by_path`). Missing paths warn on
+/// stderr; exit is always 0 unless canonicalizing a still-existing path
+/// fails. Meta is untouched.
+fn cmd_rm(opts: &LoadOpts, paths: &[PathBuf], stderr: &mut dyn Write) -> Result<()> {
+    let cfg = config::load(opts)?;
+    upload_warning(&cfg, stderr);
+    let store = store::open(&cfg.index.path, &cfg, true)?;
+    for raw in paths {
+        let expanded = expand_tilde(raw);
+        // The walk stores paths as-given, so try the canonical spelling
+        // (when the file still exists) and fall back to the expanded one.
+        let mut deleted = false;
+        if expanded.exists() {
+            let canon = std::fs::canonicalize(&expanded)?;
+            deleted = store.delete_file_by_path(&canon.to_string_lossy())?;
+        }
+        if !deleted {
+            deleted = store.delete_file_by_path(&expanded.to_string_lossy())?;
+        }
+        if !deleted {
+            let _ = writeln!(
+                stderr,
+                "warning: {} is not in index, skipping",
+                expanded.display()
+            );
+        }
+    }
+    Ok(())
+}
+
+/// `ferret gc`: delete rows whose files are gone from disk (chunks/vec/fts
+/// follow via `delete_file_by_path` + CASCADE). Never touches meta.
+fn cmd_gc(opts: &LoadOpts, stderr: &mut dyn Write) -> Result<()> {
+    let cfg = config::load(opts)?;
+    let store = store::open(&cfg.index.path, &cfg, true)?;
+    let paths: Vec<String> = {
+        let mut stmt = store.conn().prepare("SELECT path FROM files")?;
+        stmt.query_map([], |r| r.get(0))?
+            .collect::<std::result::Result<_, _>>()?
+    };
+    let mut removed = 0u64;
+    for path in &paths {
+        if !Path::new(path).exists() && store.delete_file_by_path(path)? {
+            removed += 1;
+        }
+    }
+    let _ = writeln!(stderr, "gc: removed {removed} file(s) gone from disk");
+    Ok(())
+}
+
+/// `~/...` expands to the home directory; anything else passes through.
+fn expand_tilde(path: &Path) -> PathBuf {
+    if let Some(rest) = path.to_string_lossy().strip_prefix("~/") {
+        if let Some(home) = dirs::home_dir() {
+            return home.join(rest);
+        }
+    }
+    path.to_path_buf()
 }
 
 /// `ferret config show`: merged TOML, comments stripped, `api_key` redacted.

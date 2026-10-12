@@ -3,16 +3,13 @@
 //! `dimensions` is interpolated only into the vec0 embedding width
 //! (`FLOAT[{d}]`); no path or other user input is ever concatenated into
 //! this SQL.
-//!
-//! The `chunks_fts` triggers (after insert/update/delete on `chunks`, and a
-//! rewrite when `files.path` changes) land with indexing, not here; they use
-//! the `ferret_basename(path)` scalar function that `store::open` registers
-//! on every connection.
 
 /// Complete DDL for a new index: `meta`, `files`, `chunks`, the FTS5 index
 /// over chunk text + filename + path, and the `vec0` vector table whose
 /// `rowid` mirrors `chunks.id`. Its `file_kind` metadata column is the
 /// `files.kind` (text|image|pdf), never the chunk kind.
+///
+/// Includes [`triggers`] so a fresh database is fully wired in one shot.
 pub fn ddl(dimensions: u32) -> String {
     let d = dimensions;
     format!(
@@ -53,12 +50,21 @@ CREATE VIRTUAL TABLE chunks_vec USING vec0(
   mtime INTEGER,
   collection TEXT
 );
--- FTS sync from `chunks` (spec §5.1). `chunks_fts` is CONTENTFUL, so the
--- delete trigger MUST use the plain `DELETE FROM chunks_fts WHERE rowid
--- = old.id` form: the `'delete'`-command form errors on contentful tables
--- (and silently corrupts genuinely contentless ones). filename/path come
--- from the file row via the `ferret_basename` scalar `store::open`
--- registers.
+{trigs}
+"#,
+        trigs = triggers(),
+    )
+}
+
+/// Idempotent sync triggers, applied on EVERY `store::open` (not just
+/// creation) so indexes built before a trigger existed get backfilled:
+/// `chunks_fts` mirrors `chunks` (spec §5.1; `chunks_fts` is CONTENTFUL,
+/// so the delete form MUST be the plain `DELETE ... WHERE rowid = old.id`),
+/// and `chunks_vec` rows die with their chunk (vec0 has no foreign keys).
+/// filename/path come from the file row via the `ferret_basename` scalar
+/// `store::open` registers.
+pub fn triggers() -> &'static str {
+    r#"
 CREATE TRIGGER IF NOT EXISTS chunks_fts_ai AFTER INSERT ON chunks BEGIN
   INSERT INTO chunks_fts(rowid, text, filename, path)
   SELECT new.id, new.text, ferret_basename(f.path), f.path
@@ -73,6 +79,8 @@ CREATE TRIGGER IF NOT EXISTS chunks_fts_au AFTER UPDATE ON chunks BEGIN
   SELECT new.id, new.text, ferret_basename(f.path), f.path
   FROM files f WHERE f.id = new.file_id;
 END;
+CREATE TRIGGER IF NOT EXISTS chunks_vec_ad AFTER DELETE ON chunks BEGIN
+  DELETE FROM chunks_vec WHERE rowid = old.id;
+END;
 "#
-    )
 }

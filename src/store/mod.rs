@@ -155,6 +155,10 @@ pub fn open(path: &Path, cfg: &Config, images_supported: bool) -> Result<Store> 
         store.write_initial_meta(cfg, images_supported)?;
     } else {
         store.validate_meta(cfg, path)?;
+        // Idempotent backfill AFTER validation: only a real ferret index
+        // reaches here, so `chunks` exists for the trigger bodies.
+        // Fresh databases already got them from ddl().
+        store.conn.execute_batch(schema::triggers())?;
     }
     Ok(store)
 }

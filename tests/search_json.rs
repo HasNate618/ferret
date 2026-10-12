@@ -144,3 +144,42 @@ fn json_zero_hits_is_empty_array() {
     let v: serde_json::Value = serde_json::from_str(&out).unwrap();
     assert_eq!(v["hits"].as_array().unwrap().len(), 0);
 }
+
+#[test]
+fn min_score_above_fused_rrf_drops_all_hits() {
+    let (store, cfg, fake) = fixture();
+    let parsed = parse_query("pets", &FilterFlags::default()).unwrap();
+    let req = SearchRequest {
+        parsed,
+        mode: SearchMode::Hybrid,
+        limit: 20,
+        min_score: 0.99, // fused RRF is ~0.01–0.05
+        json: true,
+    };
+    let out = run_search(&store, &fake, &cfg, req).unwrap();
+    assert!(out.hits.is_empty());
+    let v: serde_json::Value = serde_json::from_str(&render_json(&out)).unwrap();
+    assert_eq!(v["hits"].as_array().unwrap().len(), 0);
+    assert_eq!(v["min_score"], 0.99);
+}
+
+#[test]
+fn keyword_mode_leaves_vec_score_null() {
+    let (store, cfg, fake) = fixture();
+    let parsed = parse_query("pets", &FilterFlags::default()).unwrap();
+    let req = SearchRequest {
+        parsed,
+        mode: SearchMode::Keyword,
+        limit: 20,
+        min_score: 0.0,
+        json: true,
+    };
+    let out = run_search(&store, &fake, &cfg, req).unwrap();
+    assert_eq!(out.hits.len(), 1);
+    let hit = &out.hits[0];
+    assert!(hit.scores.vec.is_none());
+    assert!(hit.scores.fts.is_some());
+    assert!(hit.scores.filename.is_none());
+    let v: serde_json::Value = serde_json::from_str(&render_json(&out)).unwrap();
+    assert!(v["hits"][0]["scores"]["vec"].is_null());
+}

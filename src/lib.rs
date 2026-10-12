@@ -2,6 +2,7 @@ pub mod cli;
 pub mod config;
 pub mod embedder;
 pub mod error;
+pub mod extract;
 pub mod fingerprint;
 pub mod paths;
 pub mod search;

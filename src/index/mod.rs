@@ -270,25 +270,6 @@ fn index_file(
     summary: &mut IndexSummary,
 ) -> Result<()> {
     let path_str = path.to_string_lossy().into_owned();
-    // Capability skips: the walk does not know the embedder, so an image
-    // file no backend can embed (and HEIC with no converter) is skipped
-    // here with its NDJSON reason, deleting any existing rows. This is a
-    // skip, not an error (spec §9).
-    if kind == FileKind::Image && !images_supported {
-        store.delete_file_by_path(&path_str)?;
-        summary.skipped += 1;
-        emit_skip(sink.json, &path, SkipReason::NoImageBackend, &mut *sink.out)?;
-        return Ok(());
-    }
-    if matches!(ext.to_ascii_lowercase().as_str(), "heic" | "heif")
-        && matches!(cfg.files.heic, HeicMode::Magick)
-        && !has_magick()
-    {
-        store.delete_file_by_path(&path_str)?;
-        summary.skipped += 1;
-        emit_skip(sink.json, &path, SkipReason::NoMagick, &mut *sink.out)?;
-        return Ok(());
-    }
     let metadata = match std::fs::metadata(&path) {
         Ok(md) => md,
         Err(e) => {
@@ -317,9 +298,55 @@ fn index_file(
     let size = metadata.len();
     let file_fp = fingerprint::file_fingerprint(&path_str, mtime, size, config_fp);
 
-    // Skip fast-path: unchanged fingerprint and complete=1.
+    // Capability skips: the walk does not know the embedder, so an image
+    // file no backend can embed (and HEIC with no converter) is skipped
+    // here with its NDJSON reason. Unlike walk-skips, these persist a
+    // complete row carrying `skip_reason`: a later capability flip must
+    // find and re-evaluate the file (spec §9: skip, not error).
+    if kind == FileKind::Image && !images_supported {
+        record_capability_skip(
+            store,
+            &mut sink,
+            &path,
+            &path_str,
+            &collection,
+            kind,
+            &ext,
+            size,
+            mtime,
+            &file_fp,
+            SkipReason::NoImageBackend,
+            summary,
+        )?;
+        return Ok(());
+    }
+    if matches!(ext.to_ascii_lowercase().as_str(), "heic" | "heif")
+        && matches!(cfg.files.heic, HeicMode::Magick)
+        && extract::image::find_magick().is_none()
+    {
+        record_capability_skip(
+            store,
+            &mut sink,
+            &path,
+            &path_str,
+            &collection,
+            kind,
+            &ext,
+            size,
+            mtime,
+            &file_fp,
+            SkipReason::NoMagick,
+            summary,
+        )?;
+        return Ok(());
+    }
+
+    // Skip fast-path: unchanged fingerprint, complete, and no recorded
+    // skip. Skip rows always re-process: the capability that skipped them
+    // may have flipped without moving the fingerprint (e.g. a converter
+    // appearing on PATH).
     if let Some(row) = store.get_file_by_path(&path_str)? {
-        if row.fingerprint == file_fp && row.complete {
+        if row.fingerprint == file_fp && row.complete && row.skip_reason.is_none() {
             summary.skipped += 1;
             emit_ok(sink.json, &path, &mut *sink.out)?;
             return Ok(());
@@ -398,7 +425,25 @@ fn index_file(
         .unwrap_or_default();
     let mut inputs = Vec::new();
     for c in &chunks {
-        if matches!(c.embed, EmbedDecision::Vec) {
+        if !matches!(c.embed, EmbedDecision::Vec) {
+            continue;
+        }
+        // Image chunks carry their PNG bytes; everything else embeds as
+        // prefixed text (Task 15 adds the PdfPage arm).
+        if c.kind == crate::types::ChunkKind::Image {
+            match c.image_bytes.clone() {
+                Some(bytes) => inputs.push(EmbedInput::Image {
+                    bytes,
+                    mime: "image/png".to_string(),
+                }),
+                None => {
+                    return Err(Error::fatal(format!(
+                        "image chunk for {} has no PNG bytes",
+                        path.display()
+                    )));
+                }
+            }
+        } else {
             inputs.push(EmbedInput::Document {
                 title: Some(title.clone()),
                 text: c.text.clone().unwrap_or_default(),
@@ -527,28 +572,43 @@ fn record_extract_error(
     let _ = store.upsert_file(&row);
 }
 
-/// True when a `magick` or `convert` executable is on PATH (HEIC `"magick"`
-/// mode needs one; Task 14 owns the actual conversion).
-fn has_magick() -> bool {
-    std::env::var_os("PATH").is_some_and(|paths| {
-        std::env::split_paths(&paths).any(|dir| {
-            ["magick", "convert"].iter().any(|bin| {
-                let candidate = dir.join(bin);
-                #[cfg(unix)]
-                {
-                    use std::os::unix::fs::PermissionsExt;
-                    candidate.is_file()
-                        && candidate
-                            .metadata()
-                            .is_ok_and(|m| m.permissions().mode() & 0o111 != 0)
-                }
-                #[cfg(not(unix))]
-                {
-                    candidate.is_file()
-                }
-            })
-        })
-    })
+/// Persist a capability-skip row (complete, reason recorded, zero chunks,
+/// no error) and emit its NDJSON event. Upsert refreshes the fingerprint
+/// so a capability flip re-evaluates the file.
+#[allow(clippy::too_many_arguments)]
+fn record_capability_skip(
+    store: &Store,
+    sink: &mut EventSink<'_>,
+    path: &Path,
+    path_str: &str,
+    collection: &str,
+    kind: FileKind,
+    ext: &str,
+    size: u64,
+    mtime: i64,
+    file_fp: &str,
+    reason: SkipReason,
+    summary: &mut IndexSummary,
+) -> Result<()> {
+    store.delete_file_by_path(path_str)?;
+    let file_id = store.upsert_file(&NewFile {
+        path: path_str.to_string(),
+        collection: collection.to_string(),
+        kind,
+        ext: ext.to_string(),
+        size,
+        mtime,
+        fingerprint: file_fp.to_string(),
+        complete: true,
+        next_page: None,
+        skip_reason: Some(reason.as_str().to_string()),
+        indexed_at: now_unix(),
+        error: None,
+    })?;
+    let _ = file_id;
+    summary.skipped += 1;
+    emit_skip(sink.json, path, reason, &mut *sink.out)?;
+    Ok(())
 }
 
 fn now_unix() -> i64 {

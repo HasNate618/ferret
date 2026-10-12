@@ -23,6 +23,8 @@ chrono = { version = "0.4", default-features = false, features = ["clock"] }
 rusqlite = { version = "0.40", features = ["bundled", "functions"] }
 sqlite-vec = "=0.1.9"
 reqwest = { version = "0.13", default-features = false, features = ["blocking", "json", "rustls"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp"] }
+base64 = "0.22"
 
 [dev-dependencies]
 tempfile = "3"

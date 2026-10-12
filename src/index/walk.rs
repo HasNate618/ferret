@@ -69,6 +69,14 @@ pub enum WalkEvent {
     },
 }
 
+/// Lowercase extension without the dot, or `""` when none.
+fn ext_of(path: &Path) -> String {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase()
+}
+
 /// File kind for a lowercase extension (no dot), or `None` when the
 /// extension is unsupported in this index.
 pub fn kind_for_ext(ext: &str, map: &std::collections::BTreeMap<String, FileKind>) -> Option<FileKind> {
@@ -219,27 +227,27 @@ impl Walker<'_> {
     /// Extension typing, heic gate, then the file skip-rule list,
     /// include_globs, and gitignore, in the spec's order.
     fn emit_file(&mut self, path: &Path, root: &Path, collection: &str) -> Result<()> {
-        // 1. Extension typing (unknown extensions are walk-skips).
-        let ext = path
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("")
-            .to_ascii_lowercase();
-        let kind = match kind_for_ext(&ext, &self.files_cfg.extension_kind) {
-            Some(k) => k,
-            None => {
-                self.skip(path, SkipReason::UnsupportedExt);
-                return Ok(());
-            }
-        };
-        // HEIC/HEIF gate: `skip` (default) is a walk-skip; converting via
-        // magick is Task 14.
-        if matches!(ext.as_str(), "heic" | "heif")
+        // 0. HEIC/HEIF gate first (spec §4.3): `skip` (default) is a
+        // HeicSkip. `magick` types them as images below even though the
+        // default extension map omits heic/heif — otherwise the kind
+        // lookup would report unsupported_ext and the magick path would
+        // be unreachable. An explicit user mapping still wins.
+        if matches!(ext_of(path).as_str(), "heic" | "heif")
             && matches!(self.files_cfg.heic, crate::types::HeicMode::Skip)
         {
             self.skip(path, SkipReason::HeicSkip);
             return Ok(());
         }
+        // 1. Extension typing (unknown extensions are walk-skips).
+        let ext = ext_of(path);
+        let kind = match kind_for_ext(&ext, &self.files_cfg.extension_kind) {
+            Some(k) => k,
+            None if matches!(ext.as_str(), "heic" | "heif") => FileKind::Image,
+            None => {
+                self.skip(path, SkipReason::UnsupportedExt);
+                return Ok(());
+            }
+        };
 
         let rel = path.strip_prefix(root).unwrap_or(path);
 

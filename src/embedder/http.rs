@@ -13,6 +13,7 @@ use super::{apply_prefix, l2_normalize, truncate_or_check, EmbedInput, Embedder}
 use crate::config::Config;
 use crate::error::{Error, Result};
 use crate::types::Backend;
+use base64::Engine as _;
 
 /// Delays before attempts 2, 3, 4 on 429 / 503 / transport failure.
 const RETRY_DELAYS: [Duration; 3] = [
@@ -62,6 +63,13 @@ impl HttpEmbedder {
             "encoding_format": "float",
             "input": text,
         });
+        let resp = self.post_with_retries(&probe::embeddings_url(&self.cfg), &body)?;
+        parse_embedding(resp)
+    }
+
+    /// One image embedding round-trip with retries (Appendix B.2).
+    fn post_image(&self, png: &[u8]) -> Result<Vec<f32>> {
+        let body = image_body(&self.cfg, png);
         let resp = self.post_with_retries(&probe::embeddings_url(&self.cfg), &body)?;
         parse_embedding(resp)
     }
@@ -125,16 +133,25 @@ impl Embedder for HttpEmbedder {
             }
             Backend::LlamaServer | Backend::LitertLm => {}
         }
-        let text = match apply_prefix(self.profile, &input) {
-            Some(t) => t,
-            None => {
-                return Err(Error::file(
-                    "image-only input needs Task 14 (image embeddings)",
-                ));
+        let sized = match &input {
+            // Appendix B.2: the data-URL part is the whole input; no text
+            // prefix of any kind.
+            EmbedInput::Image { bytes, .. } => {
+                let raw = self.post_image(bytes)?;
+                truncate_or_check(raw, self.backend, self.dimensions)?
             }
+            _ => match apply_prefix(self.profile, &input) {
+                Some(t) => {
+                    let raw = self.post_text(&t)?;
+                    truncate_or_check(raw, self.backend, self.dimensions)?
+                }
+                None => {
+                    return Err(Error::file(
+                        "PDF page embeddings need Task 15 (per-page transactions)",
+                    ));
+                }
+            },
         };
-        let raw = self.post_text(&text)?;
-        let sized = truncate_or_check(raw, self.backend, self.dimensions)?;
         // The server may not L2-normalize: always normalize what we store.
         l2_normalize(sized)
     }
@@ -157,6 +174,23 @@ impl Embedder for HttpEmbedder {
             ok
         })
     }
+}
+
+/// Frozen Appendix B.2 image body, shared by the image embed path and
+/// the capability probe: the data-URL part is the whole input, no text
+/// prefix of any kind.
+pub(crate) fn image_body(cfg: &Config, png: &[u8]) -> serde_json::Value {
+    let b64 = base64::engine::general_purpose::STANDARD.encode(png);
+    json!({
+        "model": cfg.embedder.model,
+        "encoding_format": "float",
+        "input": [{ "content": [{ "type": "image_url", "image_url": { "url": format!("data:image/png;base64,{b64}") } }] }],
+    })
+}
+
+/// True when a response value carries a `data[0].embedding` array.
+pub(crate) fn has_embedding(v: &serde_json::Value) -> bool {
+    v.pointer("/data/0/embedding").is_some_and(|e| e.is_array())
 }
 
 /// `data[0].embedding` as `Vec<f32>`; anything else is a fatal protocol

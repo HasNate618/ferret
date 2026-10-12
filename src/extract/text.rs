@@ -67,6 +67,7 @@ pub fn extract_text(path: &Path, bytes: &[u8], cfg: &TextChunkConfig) -> Result<
             end_byte: end.checked_sub(1).and_then(|last| spans.get(last).map(|(_, e)| *e)),
             page: None,
             embed,
+            image_bytes: None,
         });
     }
     Ok(out)

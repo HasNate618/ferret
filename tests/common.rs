@@ -9,7 +9,8 @@ pub fn test_dirs(tmp: &std::path::Path) -> FerretDirs {
     }
 }
 
-/// A whole test environment: XDG dirs, `FERRET_EMBEDDER=fake`, a corpus
+/// Sets an env var for a test's duration. `#[serial]` makes process-env
+/// mutation safe; the var is removed on drop (even on panic).
 /// root with one markdown file, and an `init`-ed config. Mutates the
 /// process environment — callers must be `#[serial]`.
 pub struct TestEnv {
@@ -36,5 +37,28 @@ pub fn test_env() -> TestEnv {
         index: tmp.path().join("xdg-data/ferret/index.sqlite"),
         root,
         tmp,
+    }
+}
+
+/// Sets an env var for a test's duration. `#[serial]` makes process-env
+/// mutation safe; the var is removed on drop (even on panic).
+pub struct EnvGuard {
+    key: &'static str,
+}
+
+impl EnvGuard {
+    pub fn set(key: &'static str, val: &str) -> Self {
+        unsafe {
+            std::env::set_var(key, val);
+        }
+        Self { key }
+    }
+}
+
+impl Drop for EnvGuard {
+    fn drop(&mut self) {
+        unsafe {
+            std::env::remove_var(self.key);
+        }
     }
 }

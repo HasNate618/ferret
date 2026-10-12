@@ -3,7 +3,7 @@
 
 mod common;
 
-use common::TestEnv;
+use common::{EnvGuard, TestEnv};
 use ferret::embedder::{EmbedInput, Embedder, FakeEmbedder};
 use serial_test::serial;
 
@@ -150,28 +150,6 @@ fn init_openai_does_not_warn_until_index() {
     );
 }
 
-/// Sets an env var for the test's duration (`#[serial]` makes this safe).
-struct EnvGuard {
-    key: &'static str,
-}
-
-impl EnvGuard {
-    fn set(key: &'static str, val: &str) -> Self {
-        unsafe {
-            std::env::set_var(key, val);
-        }
-        Self { key }
-    }
-}
-
-impl Drop for EnvGuard {
-    fn drop(&mut self) {
-        unsafe {
-            std::env::remove_var(self.key);
-        }
-    }
-}
-
 /// An embedder that refuses images: drives the `no_image_backend`
 /// capability-skip path through the real `index::run`.
 struct NoImages(FakeEmbedder);
@@ -207,6 +185,15 @@ fn image_file_without_image_backend_is_skip_not_error() {
         events.contains("\"reason\":\"no_image_backend\""),
         "expected a no_image_backend skip, got: {events}"
     );
-    // And no row lingers for the skipped image.
-    assert!(file_row(&env.index, "pic.png").is_none());
+    // Skip rows persist (Task 14): complete=1, reason recorded, no error.
+    let conn = rusqlite::Connection::open(&env.index).unwrap();
+    let (complete, reason): (i64, Option<String>) = conn
+        .query_row(
+            "SELECT complete, skip_reason FROM files WHERE path LIKE '%pic.png'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(complete, 1);
+    assert_eq!(reason.as_deref(), Some("no_image_backend"));
 }

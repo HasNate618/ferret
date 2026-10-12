@@ -47,24 +47,22 @@ pub fn ensure_up(client: &Client, cfg: &Config) -> Result<()> {
     }
 }
 
-/// Ask the server to embed a 1x1 PNG. 200 with a parseable embedding means
-/// image support; HTTP 4xx or a transport failure means text-only. Other
-/// 5xx are treated as "no" too — a 500 on a 67-byte PNG is not a healthy
-/// multimodal server. Task 14 shares this probe.
+/// Ask the server to embed a 1x1 PNG (Appendix B.2 body, shared with the
+/// real image path). 200 with a parseable embedding means image support;
+/// HTTP 4xx or a transport failure means text-only. Other 5xx are treated
+/// as "no" too — a 500 on a 67-byte PNG is not a healthy multimodal
+/// server. Task 14 shares this probe.
 pub fn probe_images(client: &Client, cfg: &Config) -> bool {
-    let body = json!({
-        "model": cfg.embedder.model,
-        "encoding_format": "float",
-        "input": [{
-            "type": "image_url",
-            "image_url": { "url": format!("data:image/png;base64,{PROBE_PNG_BASE64}") },
-        }],
-    });
+    use base64::Engine as _;
+    let Ok(png) = base64::engine::general_purpose::STANDARD.decode(PROBE_PNG_BASE64) else {
+        return false;
+    };
+    let body = super::http::image_body(cfg, &png);
     let resp = authed(client.post(embeddings_url(cfg)), cfg).json(&body).send();
     match resp {
-        Ok(r) if r.status().is_success() => r.json::<serde_json::Value>().is_ok_and(|v| {
-            v.pointer("/data/0/embedding").is_some_and(|e| e.is_array())
-        }),
+        Ok(r) if r.status().is_success() => r
+            .json::<serde_json::Value>()
+            .is_ok_and(|v| super::http::has_embedding(&v)),
         _ => false,
     }
 }

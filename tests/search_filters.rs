@@ -87,13 +87,8 @@ fn add_file(
     h.store
         .insert_vec(&tx, chunk_id, &embedding, kind, ext, MTIME, "c")
         .unwrap();
-    h.store
-        .conn()
-        .execute(
-            "INSERT INTO chunks_fts (rowid, text, filename, path) VALUES (?1, ?2, ?3, ?4)",
-            rusqlite::params![chunk_id, text.unwrap_or(""), path.rsplit('/').next().unwrap_or(""), path],
-        )
-        .unwrap();
+    // The chunks_fts row is written by the `chunks_fts_ai` trigger (the
+    // production path); a manual insert would now collide on rowid.
     tx.commit().unwrap();
 }
 

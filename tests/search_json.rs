@@ -69,11 +69,8 @@ fn fixture() -> (Store, Config, FakeEmbedder) {
     store
         .insert_vec(&tx, chunk_id, &embedding, FileKind::Text, "md", MTIME, "Documents")
         .unwrap();
-    tx.execute(
-        "INSERT INTO chunks_fts (rowid, text, filename, path) VALUES (?1, ?2, ?3, ?4)",
-        rusqlite::params![chunk_id, DOC_TEXT, "lease.md", DOC_PATH],
-    )
-    .unwrap();
+    // The chunks_fts row is written by the `chunks_fts_ai` trigger (the
+    // production path); a manual insert would now collide on rowid.
     tx.commit().unwrap();
     KEEP.with(|k| k.borrow_mut().push(dir));
     (store, cfg, fake)

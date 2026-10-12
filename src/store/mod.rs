@@ -133,6 +133,15 @@ fn register_sqlite_vec() -> Result<()> {
 /// against the merged config.
 pub fn open(path: &Path, cfg: &Config, images_supported: bool) -> Result<Store> {
     register_sqlite_vec()?;
+    // `ferret search` / `status` work against an index that `ferret index`
+    // has not created yet: create the parent dir (e.g. `{data_dir}/ferret`)
+    // so a fresh open yields an empty index (zero hits) instead of a raw
+    // SQLite "unable to open database file".
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() && !parent.exists() {
+            std::fs::create_dir_all(parent)?;
+        }
+    }
     let new_index = !path.exists();
     let conn = Connection::open(path)?;
     let store = Store {

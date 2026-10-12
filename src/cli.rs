@@ -5,18 +5,23 @@
 //! CLI reports as `Error::fatal` (exit 1). `main` prints the `Display` on
 //! stderr and exits with `err.exit_code()`.
 //!
-//! Subcommands whose behavior lands in later tasks are stubs: `index`,
-//! `search`, and `status` return `Error::fatal("not implemented")` after
-//! their usage validation, and `rm` / `gc` are usage-ok no-ops.
+//! Subcommands whose behavior lands in later tasks are stubs: `index` and
+//! `status` return `Error::fatal("not implemented")` after their usage
+//! validation, and `rm` / `gc` are usage-ok no-ops. `search` runs the
+//! hybrid pipeline (Task 8).
 
 use crate::config::{self, LayerSource, LoadOpts};
+use crate::embedder;
 use crate::error::{Error, Result};
 use crate::paths::ferret_dirs;
-use crate::types::SearchMode;
+use crate::search::{self, FilterFlags, SearchRequest};
+use crate::store;
+use crate::types::{FileKind, SearchMode};
 use clap::{Parser, Subcommand};
 use std::collections::BTreeSet;
 use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 
 /// Captured output of an in-process run, for tests (no binary spawn needed).
 #[derive(Debug)]
@@ -227,7 +232,7 @@ fn execute(
             limit,
             mode,
             code,
-            ..
+            json,
         } => {
             let mut query = query;
             // No QUERY and stdin is not a TTY: read one line. Never prompt.
@@ -257,9 +262,116 @@ fn execute(
                     "ferret search needs a QUERY or a filter flag (e.g. --name, --under, --ext)",
                 ));
             }
-            Err(Error::fatal("not implemented"))
+            run_search_cli(
+                &opts,
+                query.as_deref(),
+                SearchArgs {
+                    kind,
+                    ext,
+                    under,
+                    collection,
+                    name,
+                    after,
+                    before,
+                    min_score,
+                    limit,
+                    mode,
+                    code,
+                    json,
+                },
+                stdout,
+            )?;
+            Ok(())
         }
     }
+}
+
+/// Flattened `Command::Search` payload for `run_search_cli`.
+struct SearchArgs {
+    kind: Vec<String>,
+    ext: Vec<String>,
+    under: Option<PathBuf>,
+    collection: Option<String>,
+    name: Option<String>,
+    after: Option<String>,
+    before: Option<String>,
+    min_score: Option<f64>,
+    limit: Option<usize>,
+    mode: Option<SearchMode>,
+    code: bool,
+    json: bool,
+}
+
+/// `ferret search`: parse the query, run the hybrid pipeline, render.
+/// Fatal errors (config, DB, embedder) propagate as exit 1 with empty
+/// stdout; zero hits is exit 0 with an empty hit list (spec §6.5).
+fn run_search_cli(
+    opts: &LoadOpts,
+    query: Option<&str>,
+    args: SearchArgs,
+    stdout: &mut dyn Write,
+) -> Result<()> {
+    let cfg = config::load(opts)?;
+    let flags = FilterFlags {
+        kind: split_kinds(&args.kind)?,
+        ext: split_strings(&args.ext),
+        under: args.under,
+        collection: args.collection,
+        name: args.name,
+        after: args.after,
+        before: args.before,
+        code: args.code,
+    };
+    let parsed = search::parse_query(query.unwrap_or(""), &flags)?;
+    let embedder = embedder::build_embedder(&cfg, &|k| std::env::var(k).ok())?;
+    let store = store::open(&cfg.index.path, &cfg, embedder.images_supported())?;
+    let req = SearchRequest {
+        parsed,
+        mode: args.mode.unwrap_or(cfg.search.mode),
+        limit: args.limit.unwrap_or(cfg.search.default_limit),
+        min_score: args.min_score.unwrap_or(cfg.search.min_score),
+        json: args.json,
+    };
+    let out = search::run_search(&store, embedder.as_ref(), &cfg, req)?;
+    if args.json {
+        writeln!(stdout, "{}", search::render_json(&out))?;
+    } else {
+        let human = search::render_human(&out);
+        if !human.is_empty() {
+            writeln!(stdout, "{human}")?;
+        }
+    }
+    Ok(())
+}
+
+/// Comma-split repeatable `--kind` values (`--kind pdf,md` == `--kind pdf
+/// --kind md`); an unknown kind is a usage error (exit 2).
+fn split_kinds(values: &[String]) -> Result<Vec<FileKind>> {
+    let mut out = Vec::new();
+    for v in values {
+        for part in v.split(',') {
+            let part = part.trim();
+            if part.is_empty() {
+                continue;
+            }
+            out.push(
+                FileKind::from_str(part)
+                    .map_err(|e| Error::usage(format!("--kind: {e}")))?,
+            );
+        }
+    }
+    Ok(out)
+}
+
+/// Comma-split repeatable `--ext` values; `parse_query` lowercases and
+/// strips any leading dot.
+fn split_strings(values: &[String]) -> Vec<String> {
+    values
+        .iter()
+        .flat_map(|v| v.split(','))
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
 }
 
 /// `ferret init`: create `{config_dir}` (0700), write a short TOML with

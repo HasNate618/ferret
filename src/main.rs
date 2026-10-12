@@ -1,4 +1,6 @@
 fn main() {
-    eprintln!("ferret: not implemented");
-    std::process::exit(1);
+    if let Err(err) = ferret::cli::run() {
+        eprintln!("{err}");
+        std::process::exit(err.exit_code());
+    }
 }

@@ -13,6 +13,7 @@
 use crate::config::{self, LayerSource, LoadOpts};
 use crate::embedder;
 use crate::error::{Error, Result};
+use crate::index;
 use crate::paths::ferret_dirs;
 use crate::search::{self, FilterFlags, SearchRequest};
 use crate::store;
@@ -215,8 +216,51 @@ fn execute(
             ConfigCmd::Show => config_show(&opts, stdout),
             ConfigCmd::Path => config_path(&opts, stdout),
         },
-        Command::Index { .. } => Err(Error::fatal("not implemented")),
-        Command::Status { .. } => Err(Error::fatal("not implemented")),
+        Command::Index { paths, json, strict } => {
+            let cfg = config::load(&opts)?;
+            let embedder = embedder::build_embedder(&cfg, &|k| std::env::var(k).ok())?;
+            let summary = index::run(&cfg, embedder.as_ref(), paths, json, strict, stdout)?;
+            if !json {
+                eprintln!(
+                    "indexed: {} seen, {} skipped, {} embedded, {} errors",
+                    summary.seen, summary.skipped, summary.embedded, summary.errors
+                );
+            }
+            Ok(())
+        }
+        Command::Status { json } => {
+            let cfg = config::load(&opts)?;
+            let store = store::open(&cfg.index.path, &cfg, true)?;
+            let c = store.status_counts()?;
+            if json {
+                let out = serde_json::json!({
+                    "index": cfg.index.path.to_string_lossy(),
+                    "model_id": cfg.embedder.model,
+                    "dimensions": cfg.embedder.dimensions,
+                    "backend": cfg.embedder.backend.to_string(),
+                    "images_supported": true,
+                    "files": {
+                        "text": c.files_text,
+                        "image": c.files_image,
+                        "pdf": c.files_pdf,
+                    },
+                    "chunks": c.chunks,
+                    "incomplete": c.incomplete,
+                    "errors": c.errors,
+                    "indexed_at_max": c.indexed_at_max,
+                });
+                writeln!(stdout, "{out}")?;
+            } else {
+                writeln!(stdout, "index: {}", cfg.index.path.display())?;
+                writeln!(
+                    stdout,
+                    "files: {} text, {} image, {} pdf ({} incomplete, {} errors)",
+                    c.files_text, c.files_image, c.files_pdf, c.incomplete, c.errors
+                )?;
+                writeln!(stdout, "chunks: {}", c.chunks)?;
+            }
+            Ok(())
+        }
         Command::Gc => Ok(()),        // stub; Task 13 fills this in
         Command::Rm { .. } => Ok(()), // stub; Task 13 fills this in
         Command::Search {

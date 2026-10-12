@@ -5,6 +5,8 @@
 
 use crate::types::ChunkKind;
 
+pub mod image;
+pub mod pdf;
 pub mod text;
 
 /// What the indexer does with an extracted chunk (spec §4.1–4.2).

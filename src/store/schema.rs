@@ -53,6 +53,26 @@ CREATE VIRTUAL TABLE chunks_vec USING vec0(
   mtime INTEGER,
   collection TEXT
 );
+-- FTS sync from `chunks` (spec §5.1). `chunks_fts` is CONTENTFUL, so the
+-- delete trigger MUST use the plain `DELETE FROM chunks_fts WHERE rowid
+-- = old.id` form: the `'delete'`-command form errors on contentful tables
+-- (and silently corrupts genuinely contentless ones). filename/path come
+-- from the file row via the `ferret_basename` scalar `store::open`
+-- registers.
+CREATE TRIGGER IF NOT EXISTS chunks_fts_ai AFTER INSERT ON chunks BEGIN
+  INSERT INTO chunks_fts(rowid, text, filename, path)
+  SELECT new.id, new.text, ferret_basename(f.path), f.path
+  FROM files f WHERE f.id = new.file_id;
+END;
+CREATE TRIGGER IF NOT EXISTS chunks_fts_ad AFTER DELETE ON chunks BEGIN
+  DELETE FROM chunks_fts WHERE rowid = old.id;
+END;
+CREATE TRIGGER IF NOT EXISTS chunks_fts_au AFTER UPDATE ON chunks BEGIN
+  DELETE FROM chunks_fts WHERE rowid = old.id;
+  INSERT INTO chunks_fts(rowid, text, filename, path)
+  SELECT new.id, new.text, ferret_basename(f.path), f.path
+  FROM files f WHERE f.id = new.file_id;
+END;
 "#
     )
 }

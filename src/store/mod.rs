@@ -280,6 +280,26 @@ impl Store {
         })
     }
 
+    /// Upsert a meta key (used to record the pipeline fingerprints each
+    /// `index` run was built with).
+    pub fn set_meta(&self, key: &str, value: &str) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO meta (key, value) VALUES (?1, ?2)\
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            rusqlite::params![key, value],
+        )?;
+        Ok(())
+    }
+
+    /// Mark a file row complete (all chunks committed).
+    pub fn mark_complete(&self, file_id: i64) -> Result<()> {
+        self.conn.execute(
+            "UPDATE files SET complete = 1, error = NULL WHERE id = ?1",
+            [file_id],
+        )?;
+        Ok(())
+    }
+
     pub fn upsert_file(&self, row: &NewFile) -> Result<i64> {
         let id: i64 = self.conn.query_row(
             "INSERT INTO files (path, collection, kind, ext, size, mtime, fingerprint, \

@@ -218,3 +218,40 @@ fn no_git_dir_means_no_gitignore_skips() {
     assert!(ev.iter().any(|e| matches!(e, WalkEvent::File { path, .. } if path.ends_with("keep.md"))));
     assert!(!ev.iter().any(|e| matches!(e, WalkEvent::Skip { reason: SkipReason::Gitignore, .. })));
 }
+
+#[test]
+fn explicit_heic_mapping_wins_over_magick_default() {
+    // The default map omits heic/heif (magick mode types them as images),
+    // but an explicit user mapping still wins.
+    use ferret::types::HeicMode;
+    let (_tmp, root) = fixture_tree();
+    std::fs::write(root.join("pic.heic"), "x").unwrap();
+    let mut cfg = files_cfg();
+    cfg.heic = HeicMode::Magick;
+    cfg.extension_kind.insert("heic".to_string(), FileKind::Text);
+    let ev = walk(&[root_entry(&root)], &[], &cfg, false).unwrap();
+    assert!(ev.iter().any(|e| matches!(
+        e,
+        WalkEvent::File { kind: FileKind::Text, ext, .. } if ext == "heic"
+    )));
+}
+
+#[test]
+fn heic_magick_mode_types_unmapped_heic_as_image() {
+    // No user mapping + magick mode: the heic gate must not report
+    // unsupported_ext (the magick path would otherwise be unreachable).
+    use ferret::types::HeicMode;
+    let (_tmp, root) = fixture_tree();
+    std::fs::write(root.join("pic.heic"), "x").unwrap();
+    let mut cfg = files_cfg();
+    cfg.heic = HeicMode::Magick;
+    let ev = walk(&[root_entry(&root)], &[], &cfg, false).unwrap();
+    assert!(ev.iter().any(|e| matches!(
+        e,
+        WalkEvent::File { kind: FileKind::Image, ext, .. } if ext == "heic"
+    )));
+    assert!(!ev.iter().any(|e| matches!(
+        e,
+        WalkEvent::Skip { reason: SkipReason::UnsupportedExt, path } if path.ends_with("pic.heic")
+    )));
+}

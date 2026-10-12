@@ -96,12 +96,16 @@ fn corrupt_image_is_extract_error() {
     let bad = tmp.path().join("bad.png");
     std::fs::write(&bad, b"this is not an image").unwrap();
     let err = extract_image(&bad, &img_cfg(1024), tmp.path(), HeicMode::Skip).unwrap_err();
-    assert!(!err.is_file_error(), "local decode failure is fatal-shaped: {err}");
+    assert!(err.is_file_error(), "corrupt image is a per-file failure: {err}");
 }
 
 #[test]
 fn heic_magick_mode_converts_with_binary_present() {
-    // Real 1x1 HEIC fixture; this machine has magick (checked in).
+    // Real 1x1 HEIC fixture; skip (do not fail) on hosts without magick.
+    if !host_has_magick() {
+        eprintln!("skip: no magick or convert on PATH");
+        return;
+    }
     let tmp = tmpdir();
     let cache = tmp.path().join("cache");
     let chunks = extract_image(
@@ -115,4 +119,14 @@ fn heic_magick_mode_converts_with_binary_present() {
     assert_eq!(chunks[0].kind, ChunkKind::Image);
     let img = decode_png(chunks[0].image_bytes.as_ref().unwrap());
     assert_eq!(img.dimensions(), (1, 1));
+}
+
+/// Host capability gate for the conversion test (`find_magick` is
+/// `pub(crate)`, so the test does its own minimal executable lookup).
+fn host_has_magick() -> bool {
+    std::env::var_os("PATH").is_some_and(|paths| {
+        std::env::split_paths(&paths).any(|dir| {
+            ["magick", "convert"].iter().any(|bin| dir.join(bin).is_file())
+        })
+    })
 }

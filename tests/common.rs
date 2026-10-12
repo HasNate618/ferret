@@ -41,24 +41,30 @@ pub fn test_env() -> TestEnv {
 }
 
 /// Sets an env var for a test's duration. `#[serial]` makes process-env
-/// mutation safe; the var is removed on drop (even on panic).
+/// mutation safe; the previous value (or absence) is restored on drop,
+/// even on panic — so `PATH` surgery cannot leak into later tests.
 pub struct EnvGuard {
     key: &'static str,
+    old: Option<std::ffi::OsString>,
 }
 
 impl EnvGuard {
     pub fn set(key: &'static str, val: &str) -> Self {
+        let old = std::env::var_os(key);
         unsafe {
             std::env::set_var(key, val);
         }
-        Self { key }
+        Self { key, old }
     }
 }
 
 impl Drop for EnvGuard {
     fn drop(&mut self) {
         unsafe {
-            std::env::remove_var(self.key);
+            match &self.old {
+                Some(v) => std::env::set_var(self.key, v),
+                None => std::env::remove_var(self.key),
+            }
         }
     }
 }

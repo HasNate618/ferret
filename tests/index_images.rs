@@ -124,7 +124,7 @@ fn flip_to_supported_reembeds_skipped_image() {
 
 #[test]
 #[serial]
-fn text_pipeline_bump_keeps_image_vecs() {
+fn text_pipeline_bump_reproduces_image_vecs() {
     let env: TestEnv = common::test_env();
     std::fs::write(env.root.join("pic.png"), png_bytes()).unwrap();
     let cfg = load_cfg();
@@ -144,6 +144,10 @@ fn text_pipeline_bump_keeps_image_vecs() {
     let mut stdout: Vec<u8> = Vec::new();
     ferret::index::run(&cfg, &fake_for(&cfg), vec![], false, false, &mut stdout).unwrap();
     let after = vec_blob_for(&env.index, "pic.png");
+    // End-state keep (§5.2 singular file fingerprint): image vecs are
+    // re-derived byte-identical while text re-embeds. True avoided-work
+    // keep needs per-pipeline file fingerprints (follow-up, needs a spec
+    // Appendix A amendment).
     assert_eq!(before, after, "image vec bytes must survive a text bump");
     // ...while the text file really did re-embed (new fingerprint).
     let pets_fp_after = files_fingerprint(&env.index, "pets.md");
@@ -155,11 +159,11 @@ fn text_pipeline_bump_keeps_image_vecs() {
 
 #[test]
 #[serial]
-fn heic_magick_without_binary_is_skip() {
+fn heic_magick_without_binary_is_walk_skip() {
     let env: TestEnv = common::test_env();
     std::fs::remove_file(env.root.join("pets.md")).unwrap();
-    // Empty file: the no_magick gate fires before any read, so no real
-    // HEIC bytes are needed.
+    // Empty file: the no_magick gate fires in the walk, so no real
+    // HEIC bytes are needed (nor any read of the file).
     std::fs::write(env.root.join("pic.heic"), b"").unwrap();
     let _heic = EnvGuard::set("FERRET__FILES__HEIC", "magick");
     // Deterministic regardless of host tools: hide every binary from PATH.
@@ -177,7 +181,7 @@ fn heic_magick_without_binary_is_skip() {
         events.contains("\"reason\":\"no_magick\""),
         "expected a no_magick skip, got: {events}"
     );
-    let (complete, reason, _) = files_row(&env.index, "pic.heic").expect("skip row must exist");
-    assert_eq!(complete, 1);
-    assert_eq!(reason.as_deref(), Some("no_magick"));
+    // Walk-skips leave no row (spec §4.5); a later run with a converter
+    // re-walks the file into the image path.
+    assert!(files_row(&env.index, "pic.heic").is_none());
 }

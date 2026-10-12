@@ -149,8 +149,10 @@ fn index_json_ndjson_events() {
 #[serial_test::serial]
 fn index_strict_fails_on_extract_errors() {
     let env = common::test_env();
-    std::fs::write(env.root.join("pic.png"), &[0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a]).unwrap();
-    let ok = try_run(&["ferret", "index"]).unwrap(); // image stub errors are per-file
+    // Truncated PNG bytes: undecodable, so the per-file extract-error
+    // path (and --strict) still triggers now that images extract for real.
+    std::fs::write(env.root.join("pic.png"), [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a]).unwrap();
+    let ok = try_run(&["ferret", "index"]).unwrap(); // decode failure is per-file
     assert!(!ok.stdout.is_empty() || true);
     let err = try_run(&["ferret", "index", "--strict"]).unwrap_err();
     assert_eq!(err.exit_code(), 1);

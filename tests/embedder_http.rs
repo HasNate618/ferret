@@ -227,3 +227,38 @@ fn multimodal_config_overrides_probe() {
     let e = HttpEmbedder::new(&cfg).unwrap();
     assert!(!e.images_supported());
 }
+
+#[test]
+fn llama_server_image_body_is_appendix_b2() {
+    // Frozen B.2: input:[{content:[{type:image_url,...}]}]. `json_body`
+    // is an EXACT structural match, so any extra key (dimensions, text
+    // prefix) fails the mock and the unwrap below.
+    let server = httpmock::MockServer::start();
+    let mock = server.mock(|when, then| {
+        when.method("POST").path("/v1/embeddings").json_body(serde_json::json!({
+            "model": "embeddinggemma-2",
+            "encoding_format": "float",
+            "input": [{
+                "content": [{
+                    "type": "image_url",
+                    "image_url": { "url": "data:image/png;base64,QUJD" }
+                }]
+            }]
+        }));
+        then.status(200).json_body(serde_json::json!({
+            "data": [{ "embedding": [1.0, 0.0, 0.0, 0.0] }]
+        }));
+    });
+    let cfg = test_cfg(&server.base_url());
+    let e = HttpEmbedder::new(&cfg).unwrap();
+    // "ABC" is not a valid PNG; the body shape is what matters here (the
+    // server is mocked). base64("ABC") == "QUJD".
+    let v = e
+        .embed(EmbedInput::Image {
+            bytes: b"ABC".to_vec(),
+            mime: "image/png".into(),
+        })
+        .unwrap();
+    assert_eq!(v.len(), 4);
+    mock.assert();
+}

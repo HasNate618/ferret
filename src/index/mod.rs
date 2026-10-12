@@ -22,7 +22,7 @@ use crate::extract::{self, Chunk, EmbedDecision};
 use crate::fingerprint;
 use crate::paths::ferret_dirs;
 use crate::store::{self, NewChunk, NewFile, Store};
-use crate::types::{FileKind, HeicMode};
+use crate::types::FileKind;
 
 /// Index run counters (stderr summary: seen / skipped / embedded / errors).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -230,30 +230,31 @@ fn apply_pipeline_changes(
         conn.execute("DELETE FROM chunks", [])?;
         conn.execute("DELETE FROM files", [])?;
     } else if text_changed {
-        conn_delete_kind(store, "kind = 'text'");
+        conn_delete_kind(store, "kind = 'text'")?;
     } else {
-        conn_delete_kind(store, "kind IN ('image', 'pdf_page')");
+        conn_delete_kind(store, "kind IN ('image', 'pdf_page')")?;
     }
     Ok(())
 }
 
-fn conn_delete_kind(store: &Store, kind_filter: &str) {
+fn conn_delete_kind(store: &Store, kind_filter: &str) -> Result<()> {
     let conn = store.conn();
-    let _ = conn.execute(
+    conn.execute(
         &format!("DELETE FROM chunks_vec WHERE rowid IN (SELECT id FROM chunks WHERE {kind_filter})"),
         [],
-    );
-    let _ = conn.execute(
+    )?;
+    conn.execute(
         &format!("DELETE FROM chunks_fts WHERE rowid IN (SELECT id FROM chunks WHERE {kind_filter})"),
         [],
-    );
-    let _ = conn.execute(&format!("DELETE FROM chunks WHERE {kind_filter}"), []);
+    )?;
+    conn.execute(&format!("DELETE FROM chunks WHERE {kind_filter}"), [])?;
+    Ok(())
 }
 
-/// Index one walked file. Text files extract/embed/commit in one
-/// transaction; image and PDF hit the Task 14/15 stubs, whose errors are
-/// recorded per file (never fatal to the walk). Embedder failures DO
-/// propagate.
+/// Index one walked file. Text and image files extract/embed/commit in one
+/// transaction (PDF per-page transactions land in Task 15); extract
+/// failures are recorded per file (never fatal to the walk). Embedder
+/// transport failures DO propagate.
 #[allow(clippy::too_many_arguments)]
 fn index_file(
     store: &Store,
@@ -284,7 +285,6 @@ fn index_file(
                 config_fp,
                 Error::fatal(e.to_string()),
                 summary,
-                false,
             );
             return Ok(());
         }
@@ -299,10 +299,11 @@ fn index_file(
     let file_fp = fingerprint::file_fingerprint(&path_str, mtime, size, config_fp);
 
     // Capability skips: the walk does not know the embedder, so an image
-    // file no backend can embed (and HEIC with no converter) is skipped
-    // here with its NDJSON reason. Unlike walk-skips, these persist a
-    // complete row carrying `skip_reason`: a later capability flip must
-    // find and re-evaluate the file (spec §9: skip, not error).
+    // file no backend can embed is skipped here with its NDJSON reason.
+    // Unlike walk-skips, these persist a complete row carrying
+    // `skip_reason`: a later probe flip must find and re-evaluate the
+    // file (spec §9: skip, not error). (HEIC converter absence is a
+    // walk-skip decided in `walk`, not here.)
     if kind == FileKind::Image && !images_supported {
         record_capability_skip(
             store,
@@ -320,31 +321,10 @@ fn index_file(
         )?;
         return Ok(());
     }
-    if matches!(ext.to_ascii_lowercase().as_str(), "heic" | "heif")
-        && matches!(cfg.files.heic, HeicMode::Magick)
-        && extract::image::find_magick().is_none()
-    {
-        record_capability_skip(
-            store,
-            &mut sink,
-            &path,
-            &path_str,
-            &collection,
-            kind,
-            &ext,
-            size,
-            mtime,
-            &file_fp,
-            SkipReason::NoMagick,
-            summary,
-        )?;
-        return Ok(());
-    }
 
     // Skip fast-path: unchanged fingerprint, complete, and no recorded
-    // skip. Skip rows always re-process: the capability that skipped them
-    // may have flipped without moving the fingerprint (e.g. a converter
-    // appearing on PATH).
+    // skip. no_image_backend rows always re-process: the probe result may
+    // have flipped without moving the fingerprint.
     if let Some(row) = store.get_file_by_path(&path_str)? {
         if row.fingerprint == file_fp && row.complete && row.skip_reason.is_none() {
             summary.skipped += 1;
@@ -372,7 +352,6 @@ fn index_file(
                         config_fp,
                         Error::fatal(e.to_string()),
                         summary,
-                        false,
                     );
                     return Ok(());
                 }
@@ -381,7 +360,7 @@ fn index_file(
                 Ok(chunks) => chunks,
                 Err(e) => {
                     record_extract_error(
-                        store, &mut sink, &path, &collection, kind, &ext, config_fp, e, summary, false,
+                        store, &mut sink, &path, &collection, kind, &ext, config_fp, e, summary,
                     );
                     return Ok(());
                 }
@@ -396,7 +375,7 @@ fn index_file(
             Ok(chunks) => chunks,
             Err(e) => {
                 record_extract_error(
-                    store, &mut sink, &path, &collection, kind, &ext, config_fp, e, summary, false,
+                    store, &mut sink, &path, &collection, kind, &ext, config_fp, e, summary,
                 );
                 return Ok(());
             }
@@ -411,7 +390,7 @@ fn index_file(
             Ok(chunks) => chunks,
             Err(e) => {
                 record_extract_error(
-                    store, &mut sink, &path, &collection, kind, &ext, config_fp, e, summary, false,
+                    store, &mut sink, &path, &collection, kind, &ext, config_fp, e, summary,
                 );
                 return Ok(());
             }
@@ -431,9 +410,9 @@ fn index_file(
         // Image chunks carry their PNG bytes; everything else embeds as
         // prefixed text (Task 15 adds the PdfPage arm).
         if c.kind == crate::types::ChunkKind::Image {
-            match c.image_bytes.clone() {
+            match &c.image_bytes {
                 Some(bytes) => inputs.push(EmbedInput::Image {
-                    bytes,
+                    bytes: bytes.clone(),
                     mime: "image/png".to_string(),
                 }),
                 None => {
@@ -457,7 +436,7 @@ fn index_file(
         Ok(vectors) => vectors,
         Err(e) if e.is_file_error() => {
             record_extract_error(
-                store, &mut sink, &path, &collection, kind, &ext, config_fp, e, summary, false,
+                store, &mut sink, &path, &collection, kind, &ext, config_fp, e, summary,
             );
             return Ok(());
         }
@@ -524,9 +503,7 @@ fn record_extract_error(
     config_fp: &str,
     err: Error,
     summary: &mut IndexSummary,
-    complete: bool,
 ) {
-    let _ = complete;
     summary.errors += 1;
     let message = err.to_string();
     let path_str = path.to_string_lossy().into_owned();
@@ -591,7 +568,7 @@ fn record_capability_skip(
     summary: &mut IndexSummary,
 ) -> Result<()> {
     store.delete_file_by_path(path_str)?;
-    let file_id = store.upsert_file(&NewFile {
+    store.upsert_file(&NewFile {
         path: path_str.to_string(),
         collection: collection.to_string(),
         kind,
@@ -605,7 +582,6 @@ fn record_capability_skip(
         indexed_at: now_unix(),
         error: None,
     })?;
-    let _ = file_id;
     summary.skipped += 1;
     emit_skip(sink.json, path, reason, &mut *sink.out)?;
     Ok(())

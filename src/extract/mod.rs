@@ -36,3 +36,8 @@ pub struct Chunk {
 }
 
 pub use text::extract_text;
+
+/// One file's extraction result: zero or more chunks. Text files emit many;
+/// an image emits exactly one; a PDF page emits one per page (Task 15).
+/// (`Vec<Chunk>` today; the name locks the plan's `ExtractOutcome`.)
+pub type ExtractOutcome = Vec<Chunk>;

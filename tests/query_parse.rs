@@ -55,3 +55,51 @@ fn invalid_date_is_usage() {
         .unwrap_err();
     assert_eq!(err.exit_code(), 2);
 }
+
+#[test]
+fn quoted_prefix_value_keeps_spaces() {
+    let p = parse_query("under:\"/tmp\" pets", &FilterFlags::default()).unwrap();
+    assert_eq!(p.filters.under, Some(std::fs::canonicalize("/tmp").unwrap()));
+    assert_eq!(p.nl_query, "pets");
+}
+
+#[test]
+fn repeated_prefixes_union() {
+    let p = parse_query("kind:pdf kind:text pets", &FilterFlags::default()).unwrap();
+    assert_eq!(p.filters.kind, vec![FileKind::Pdf, FileKind::Text]);
+}
+
+#[test]
+fn phrase_unquotes_in_semantic_copy_only() {
+    let p = parse_query("\"pets in the lease\"", &FilterFlags::default()).unwrap();
+    assert_eq!(p.semantic_query, "pets in the lease");
+    assert_eq!(p.keyword_query, "\"pets in the lease\"");
+}
+
+#[test]
+fn boolean_operators_dropped_from_semantic_copy() {
+    let p = parse_query("cats OR dogs", &FilterFlags::default()).unwrap();
+    assert_eq!(p.semantic_query, "cats dogs");
+    assert_eq!(p.keyword_query, "cats OR dogs");
+}
+
+#[test]
+fn filters_only_query_has_empty_text_copy() {
+    let p = parse_query("kind:pdf", &FilterFlags::default()).unwrap();
+    assert_eq!(p.nl_query, "");
+    assert_eq!(p.semantic_query, "");
+    assert_eq!(p.filters.kind, vec![FileKind::Pdf]);
+}
+
+#[test]
+fn plus_token_dropped_semantically() {
+    let p = parse_query("+lease pets", &FilterFlags::default()).unwrap();
+    assert_eq!(p.semantic_query, "pets");
+    assert_eq!(p.keyword_query, "+lease pets");
+}
+
+#[test]
+fn missing_under_dir_is_usage() {
+    let err = parse_query("under:/definitely/not/here x", &FilterFlags::default()).unwrap_err();
+    assert_eq!(err.exit_code(), 2);
+}

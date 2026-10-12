@@ -15,6 +15,7 @@ serde = { version = "1", features = ["derive"] }
 toml = "0.8"
 serde_json = "1"
 blake3 = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
 rusqlite = { version = "0.40", features = ["bundled", "functions"] }
 sqlite-vec = "=0.1.9"
 

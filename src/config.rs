@@ -981,7 +981,7 @@ fn build_roots(spec: RootSpec) -> Result<Vec<RootEntry>> {
     Ok(entries)
 }
 
-fn expand_tilde(p: &str) -> PathBuf {
+pub(crate) fn expand_tilde(p: &str) -> PathBuf {
     let home = dirs::home_dir().unwrap_or_default();
     if p == "~" {
         home

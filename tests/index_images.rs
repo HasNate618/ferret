@@ -79,7 +79,7 @@ fn multimodal_false_records_skip_row_not_error() {
     let http = ferret::embedder::HttpEmbedder::new(&cfg).unwrap();
     assert!(!http.images_supported());
     let mut stdout: Vec<u8> = Vec::new();
-    let summary = ferret::index::run(&cfg, &http, vec![], true, false, &mut stdout).unwrap();
+    let summary = ferret::index::run(&cfg, &http, vec![], true, false, &mut stdout, &mut Vec::new()).unwrap();
     assert_eq!(summary.errors, 0, "capability skip is not an error");
     assert_eq!(summary.skipped, 1);
     let events = String::from_utf8(stdout).unwrap();
@@ -105,7 +105,7 @@ fn flip_to_supported_reembeds_skipped_image() {
     let cfg = load_cfg();
     let http = ferret::embedder::HttpEmbedder::new(&cfg).unwrap();
     let mut stdout: Vec<u8> = Vec::new();
-    ferret::index::run(&cfg, &http, vec![], true, false, &mut stdout).unwrap();
+    ferret::index::run(&cfg, &http, vec![], true, false, &mut stdout, &mut Vec::new()).unwrap();
     assert_eq!(count(&env.index, "chunks"), 0);
     drop(guard);
     // Probe now succeeds (fake): the image fingerprint changed with
@@ -113,7 +113,7 @@ fn flip_to_supported_reembeds_skipped_image() {
     let cfg = load_cfg();
     let fake = fake_for(&cfg);
     let mut stdout: Vec<u8> = Vec::new();
-    let summary = ferret::index::run(&cfg, &fake, vec![], true, false, &mut stdout).unwrap();
+    let summary = ferret::index::run(&cfg, &fake, vec![], true, false, &mut stdout, &mut Vec::new()).unwrap();
     assert_eq!(summary.errors, 0);
     assert_eq!(count(&env.index, "chunks"), 1, "image must gain a chunk");
     assert_eq!(count(&env.index, "chunks_vec"), 1, "image must gain a vec");
@@ -129,7 +129,7 @@ fn text_pipeline_bump_reproduces_image_vecs() {
     std::fs::write(env.root.join("pic.png"), png_bytes()).unwrap();
     let cfg = load_cfg();
     let mut stdout: Vec<u8> = Vec::new();
-    ferret::index::run(&cfg, &fake_for(&cfg), vec![], false, false, &mut stdout).unwrap();
+    ferret::index::run(&cfg, &fake_for(&cfg), vec![], false, false, &mut stdout, &mut Vec::new()).unwrap();
     let before = vec_blob_for(&env.index, "pic.png");
     assert!(!before.is_empty());
     let pets_fp_before = files_fingerprint(&env.index, "pets.md");
@@ -142,7 +142,7 @@ fn text_pipeline_bump_reproduces_image_vecs() {
     .unwrap();
     let cfg = load_cfg();
     let mut stdout: Vec<u8> = Vec::new();
-    ferret::index::run(&cfg, &fake_for(&cfg), vec![], false, false, &mut stdout).unwrap();
+    ferret::index::run(&cfg, &fake_for(&cfg), vec![], false, false, &mut stdout, &mut Vec::new()).unwrap();
     let after = vec_blob_for(&env.index, "pic.png");
     // End-state keep (§5.2 singular file fingerprint): image vecs are
     // re-derived byte-identical while text re-embeds. True avoided-work
@@ -174,7 +174,7 @@ fn heic_magick_without_binary_is_walk_skip() {
     assert_eq!(cfg.files.heic.to_string(), "magick");
     let mut stdout: Vec<u8> = Vec::new();
     let summary =
-        ferret::index::run(&cfg, &fake_for(&cfg), vec![], true, false, &mut stdout).unwrap();
+        ferret::index::run(&cfg, &fake_for(&cfg), vec![], true, false, &mut stdout, &mut Vec::new()).unwrap();
     assert_eq!(summary.errors, 0, "missing converter is a skip, not an error");
     let events = String::from_utf8(stdout).unwrap();
     assert!(

@@ -74,6 +74,14 @@ impl HttpEmbedder {
         parse_embedding(resp)
     }
 
+    /// One PDF page round-trip with retries (Appendix B.3: image part
+    /// first, then the text part).
+    fn post_pdf_page(&self, png: &[u8], text: Option<&str>) -> Result<Vec<f32>> {
+        let body = pdf_page_body(&self.cfg, self.profile, png, text);
+        let resp = self.post_with_retries(&probe::embeddings_url(&self.cfg), &body)?;
+        parse_embedding(resp)
+    }
+
     /// POST with the frozen retry policy: 429 / 503 / transport failure
     /// retry after 200/400/800ms (at most 4 attempts); other 4xx return a
     /// per-file error immediately; other 5xx are fatal without retry.
@@ -140,6 +148,12 @@ impl Embedder for HttpEmbedder {
                 let raw = self.post_image(bytes)?;
                 truncate_or_check(raw, self.backend, self.dimensions)?
             }
+            // Appendix B.3: image part first, then the Document-prefixed
+            // page text (empty string when the page has no text).
+            EmbedInput::PdfPage { image_png, text } => {
+                let raw = self.post_pdf_page(image_png, text.as_deref())?;
+                truncate_or_check(raw, self.backend, self.dimensions)?
+            }
             _ => match apply_prefix(self.profile, &input) {
                 Some(t) => {
                     let raw = self.post_text(&t)?;
@@ -185,6 +199,41 @@ pub(crate) fn image_body(cfg: &Config, png: &[u8]) -> serde_json::Value {
         "model": cfg.embedder.model,
         "encoding_format": "float",
         "input": [{ "content": [{ "type": "image_url", "image_url": { "url": format!("data:image/png;base64,{b64}") } }] }],
+    })
+}
+
+/// Frozen Appendix B.3 PDF page body: the image part first, then the
+/// text part carrying the profile's Document-prefixed page text (empty
+/// string when the page has no text or `embed_text` is off — the part is
+/// still present). No `<|image|>` marker anywhere: llama.cpp substitutes
+/// the image part itself. (Spec prose governs over the B.3 example JSON,
+/// which shows the text abbreviated.)
+pub(crate) fn pdf_page_body(
+    cfg: &Config,
+    profile: crate::types::PrefixProfile,
+    png: &[u8],
+    text: Option<&str>,
+) -> serde_json::Value {
+    use base64::Engine as _;
+    let b64 = base64::engine::general_purpose::STANDARD.encode(png);
+    let prefixed: String = text
+        .and_then(|t| {
+            apply_prefix(
+                profile,
+                &EmbedInput::Document {
+                    title: None,
+                    text: t.to_string(),
+                },
+            )
+        })
+        .unwrap_or_default();
+    json!({
+        "model": cfg.embedder.model,
+        "encoding_format": "float",
+        "input": [{ "content": [
+            { "type": "image_url", "image_url": { "url": format!("data:image/png;base64,{b64}") } },
+            { "type": "text", "text": prefixed },
+        ] }],
     })
 }
 

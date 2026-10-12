@@ -220,7 +220,7 @@ fn execute(
             let cfg = config::load(&opts)?;
             upload_warning(&cfg, stderr);
             let embedder = embedder::build_embedder(&cfg, &|k| std::env::var(k).ok())?;
-            let summary = index::run(&cfg, embedder.as_ref(), paths, json, strict, stdout)?;
+            let summary = index::run(&cfg, embedder.as_ref(), paths, json, strict, stdout, stderr)?;
             if !json {
                 writeln!(
                     stderr,

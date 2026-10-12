@@ -262,3 +262,70 @@ fn llama_server_image_body_is_appendix_b2() {
     assert_eq!(v.len(), 4);
     mock.assert();
 }
+
+#[test]
+fn llama_server_pdf_body_is_appendix_b3() {
+    // Frozen B.3: image part first, then the Document-prefixed text part.
+    // Exact structural match: a `<|image|>` marker or a missing text part
+    // fails the mock and the unwrap below.
+    let server = httpmock::MockServer::start();
+    let mock = server.mock(|when, then| {
+        when.method("POST").path("/v1/embeddings").json_body(serde_json::json!({
+            "model": "embeddinggemma-2",
+            "encoding_format": "float",
+            "input": [{
+                "content": [
+                    { "type": "image_url",
+                      "image_url": { "url": "data:image/png;base64,QUJD" } },
+                    { "type": "text",
+                      "text": "title: none | text: page one pets" }
+                ]
+            }]
+        }));
+        then.status(200).json_body(serde_json::json!({
+            "data": [{ "embedding": [1.0, 0.0, 0.0, 0.0] }]
+        }));
+    });
+    let cfg = test_cfg(&server.base_url());
+    let e = HttpEmbedder::new(&cfg).unwrap();
+    let v = e
+        .embed(EmbedInput::PdfPage {
+            image_png: b"ABC".to_vec(),
+            text: Some("page one pets".to_string()),
+        })
+        .unwrap();
+    assert_eq!(v.len(), 4);
+    mock.assert();
+}
+
+#[test]
+fn llama_server_pdf_body_textless_page_has_empty_text_part() {
+    // No page text (or embed_text=false): the text part is still present
+    // with an empty string — never a `<|image|>` marker.
+    let server = httpmock::MockServer::start();
+    let mock = server.mock(|when, then| {
+        when.method("POST").path("/v1/embeddings").json_body(serde_json::json!({
+            "model": "embeddinggemma-2",
+            "encoding_format": "float",
+            "input": [{
+                "content": [
+                    { "type": "image_url",
+                      "image_url": { "url": "data:image/png;base64,QUJD" } },
+                    { "type": "text", "text": "" }
+                ]
+            }]
+        }));
+        then.status(200).json_body(serde_json::json!({
+            "data": [{ "embedding": [0.0, 1.0, 0.0, 0.0] }]
+        }));
+    });
+    let cfg = test_cfg(&server.base_url());
+    let e = HttpEmbedder::new(&cfg).unwrap();
+    let _ = e
+        .embed(EmbedInput::PdfPage {
+            image_png: b"ABC".to_vec(),
+            text: None,
+        })
+        .unwrap();
+    mock.assert();
+}

@@ -373,6 +373,80 @@ impl Store {
         Ok(deleted > 0)
     }
 
+    /// Page numbers present in `chunks` for a file, ascending. Drives the
+    /// PDF backfill check (a page below `next_page` with no chunk).
+    pub fn chunk_pages(&self, file_id: i64) -> Result<Vec<i64>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT page FROM chunks WHERE file_id = ?1 AND page IS NOT NULL")?;
+        let pages = stmt
+            .query_map([file_id], |r| r.get(0))?
+            .collect::<std::result::Result<Vec<Option<i64>>, _>>()?;
+        Ok(pages.into_iter().flatten().collect())
+    }
+
+    /// True when the page has a chunk WITH a vector. A chunk without a vec
+    /// (image-pipeline bump deleted vecs only) still needs embedding work.
+    pub fn page_has_vec(&self, file_id: i64, page: i64) -> Result<bool> {
+        let n: i64 = self.conn.query_row(
+            "SELECT count(*) FROM chunks c JOIN chunks_vec v ON v.rowid = c.id \
+             WHERE c.file_id = ?1 AND c.page = ?2",
+            rusqlite::params![file_id, page],
+            |r| r.get(0),
+        )?;
+        Ok(n > 0)
+    }
+
+    /// Delete one page's chunks (vec/fts follow via the sync triggers).
+    /// Makes page processing idempotent: reprocessing a page never dupes.
+    pub fn delete_page_chunks(&self, tx: &rusqlite::Transaction<'_>, file_id: i64, page: i64) -> Result<()> {
+        tx.execute(
+            "DELETE FROM chunks WHERE file_id = ?1 AND page = ?2",
+            rusqlite::params![file_id, page],
+        )?;
+        Ok(())
+    }
+
+    /// Advance the resume cursor, optionally closing the file. `error`
+    /// `None` clears a previous failure (a later success heals the row).
+    pub fn set_pdf_progress(
+        &self,
+        tx: &rusqlite::Transaction<'_>,
+        file_id: i64,
+        next_page: i64,
+        complete: bool,
+        error: Option<&str>,
+    ) -> Result<()> {
+        tx.execute(
+            "UPDATE files SET next_page = ?1, complete = ?2, error = ?3 WHERE id = ?4",
+            rusqlite::params![next_page, complete as i64, error, file_id],
+        )?;
+        Ok(())
+    }
+
+    /// Delete one file's `pdf_page` vec rows (image-pipeline bump keeps
+    /// chunks + text, re-embeds images from `next_page = 1`).
+    pub fn delete_pdf_vecs(&self, file_id: i64) -> Result<()> {
+        self.conn.execute(
+            "DELETE FROM chunks_vec WHERE rowid IN \
+             (SELECT id FROM chunks WHERE file_id = ?1 AND kind = 'pdf_page')",
+            [file_id],
+        )?;
+        Ok(())
+    }
+
+    /// Rewrite one page's stored text (text-pipeline bump refreshes FTS
+    /// without touching vectors; the `chunks_fts_au` trigger follows).
+    /// Empty text stores as NULL, like `insert_chunk`.
+    pub fn update_chunk_text(&self, file_id: i64, page: i64, text: &str) -> Result<()> {
+        let text = if text.is_empty() { None } else { Some(text) };
+        self.conn.execute(
+            "UPDATE chunks SET text = ?1 WHERE file_id = ?2 AND page = ?3",
+            rusqlite::params![text, file_id, page],
+        )?;
+        Ok(())
+    }
+
     pub fn insert_chunk(&self, tx: &Transaction<'_>, chunk: NewChunk) -> Result<i64> {
         // Empty text is stored as SQL NULL.
         let text = chunk.text.as_deref().filter(|t| !t.is_empty());

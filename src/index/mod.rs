@@ -46,6 +46,7 @@ pub fn run(
     json_ndjson: bool,
     strict: bool,
     out: &mut dyn std::io::Write,
+    err: &mut dyn std::io::Write,
 ) -> Result<IndexSummary> {
     // Collection names are unique across roots; an extra path outside every
     // root must not reuse one.
@@ -71,8 +72,22 @@ pub fn run(
     )?;
     summary.seen = events.len() as u64;
 
+    // PDFs defer to the two-pass scheduler below (spec §4.4): every PDF
+    // first advances through `first_pass_pages`, then the remainder.
+    // Their NDJSON events therefore come after text/image events.
+    let mut pdf_jobs: Vec<PdfJob> = Vec::new();
     for event in events {
         match event {
+            WalkEvent::File {
+                path,
+                collection,
+                kind: FileKind::Pdf,
+                ext,
+            } => pdf_jobs.push(PdfJob {
+                path,
+                collection,
+                ext,
+            }),
             WalkEvent::File {
                 path,
                 collection,
@@ -103,6 +118,19 @@ pub fn run(
             }
         }
     }
+    index_pdfs_in_passes(
+        &store,
+        embedder,
+        cfg,
+        &config_fp,
+        images_supported,
+        &dirs.cache_dir,
+        json_ndjson,
+        out,
+        err,
+        pdf_jobs,
+        &mut summary,
+    )?;
 
     // Record the fingerprints this run was built with (also when zero files
     // were walked, so the next run knows a reindex is not pending), plus
@@ -127,7 +155,506 @@ pub fn run(
     Ok(summary)
 }
 
-/// NDJSON/stdout sink shared by the per-file helpers.
+/// A walked PDF awaiting the two-pass scheduler. Metadata and the file
+/// row are resolved inside `index_pdf_file` (it needs the row id for
+/// raster paths); the walk only classifies.
+#[derive(Clone)]
+struct PdfJob {
+    path: PathBuf,
+    collection: String,
+    ext: String,
+}
+
+/// Two-pass PDF scheduling (spec §4.4): pass 1 brings every PDF from its
+/// cursor through `min(first_pass_pages, max_pages, n)`; pass 2 continues
+/// through `min(max_pages, n)`. A file that completes or fails in pass 1
+/// is not revisited in pass 2 (a failed page must never be jumped over).
+#[allow(clippy::too_many_arguments)]
+fn index_pdfs_in_passes(
+    store: &Store,
+    embedder: &dyn Embedder,
+    cfg: &Config,
+    config_fp: &str,
+    images_supported: bool,
+    cache_dir: &Path,
+    json_ndjson: bool,
+    out: &mut dyn std::io::Write,
+    err: &mut dyn std::io::Write,
+    jobs: Vec<PdfJob>,
+    summary: &mut IndexSummary,
+) -> Result<()> {
+    // Pass 1: every job advances up to first_pass_pages (capped by
+    // max_pages inside); unfinished jobs continue in pass 2.
+    let mut pending: Vec<PdfJob> = Vec::new();
+    for job in &jobs {
+        let finished = index_pdf_file(
+            store,
+            embedder,
+            cfg,
+            config_fp,
+            images_supported,
+            cache_dir,
+            EventSink {
+                json: json_ndjson,
+                out: &mut *out,
+            },
+            err,
+            job,
+            cfg.chunk.pdf.first_pass_pages.min(cfg.chunk.pdf.max_pages),
+            summary,
+        )?;
+        if !finished {
+            pending.push(job.clone());
+        }
+    }
+    // Pass 2: remainder up to max_pages.
+    for job in &pending {
+        index_pdf_file(
+            store,
+            embedder,
+            cfg,
+            config_fp,
+            images_supported,
+            cache_dir,
+            EventSink {
+                json: json_ndjson,
+                out: &mut *out,
+            },
+            err,
+            job,
+            cfg.chunk.pdf.max_pages,
+            summary,
+        )?;
+    }
+    Ok(())
+}
+
+/// Resolved poppler binaries for one PDF file's planned work.
+struct PdfBins {
+    pdfinfo: PathBuf,
+    pdftotext: PathBuf,
+    pdftoppm: Option<PathBuf>,
+}
+
+/// Resolve the binaries a PDF needs: pdfinfo + pdftotext always (page
+/// text is always stored); pdftoppm only when page images may embed.
+fn resolve_pdf_bins(
+    extract_cfg: &crate::config::ExtractConfig,
+    need_render: bool,
+) -> Result<PdfBins> {
+    let pdfinfo = crate::extract::pdf::resolve_tool(extract_cfg, "pdfinfo")?;
+    let pdftotext = crate::extract::pdf::resolve_tool(extract_cfg, "pdftotext")?;
+    let pdftoppm = if need_render {
+        Some(crate::extract::pdf::resolve_tool(extract_cfg, "pdftoppm")?)
+    } else {
+        None
+    };
+    Ok(PdfBins {
+        pdfinfo,
+        pdftotext,
+        pdftoppm,
+    })
+}
+
+/// One page's outcome: embedded, deliberately skipped (no chunk, cursor
+/// advances), or file-failing (record the file error, stop this file).
+enum PageOutcome {
+    Done,
+    Skipped,
+    Failed(String),
+}
+
+/// Index one PDF through this pass's page ceiling. Returns true when the
+/// file needs no more work this run (complete, fast-path-skipped, or
+/// failed — a failed page must never be jumped over, so failure ends
+/// this file's run).
+///
+/// One SQLite transaction per page: extract page, embed, insert chunk +
+/// vec, bump `next_page`, commit. An abort (fatal embedder/DB error)
+/// rolls back only the open page; committed pages stay with `complete=0`.
+#[allow(clippy::too_many_arguments)]
+fn index_pdf_file(
+    store: &Store,
+    embedder: &dyn Embedder,
+    cfg: &Config,
+    config_fp: &str,
+    images_supported: bool,
+    cache_dir: &Path,
+    mut sink: EventSink<'_>,
+    err: &mut dyn std::io::Write,
+    job: &PdfJob,
+    pass_limit: u32,
+    summary: &mut IndexSummary,
+) -> Result<bool> {
+    let path = &job.path;
+    let path_str = path.to_string_lossy().into_owned();
+    let metadata = match std::fs::metadata(path) {
+        Ok(md) => md,
+        Err(e) => {
+            record_pdf_error(
+                store, &mut sink, path, &path_str, &job.collection, &job.ext,
+                config_fp, 1, &Error::fatal(e.to_string()), summary,
+            )?;
+            return Ok(true);
+        }
+    };
+    let mtime = metadata
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let size = metadata.len();
+    let file_fp = fingerprint::file_fingerprint(&path_str, mtime, size, config_fp);
+
+    // Fast-path: unchanged fingerprint and complete (PDF rows never carry
+    // skip_reason, so no reason guard is needed).
+    if let Some(row) = store.get_file_by_path(&path_str)? {
+        if row.fingerprint == file_fp && row.complete {
+            summary.skipped += 1;
+            emit_ok(sink.json, path, &mut *sink.out)?;
+            return Ok(true);
+        }
+    }
+
+    // Poppler: pdfinfo + pdftotext always (page text is always stored);
+    // pdftoppm only when page images may embed.
+    let need_render = cfg.chunk.pdf.embed_page_image && images_supported;
+    let bins = match resolve_pdf_bins(&cfg.extract, need_render) {
+        Ok(b) => b,
+        Err(e) => {
+            record_pdf_error(
+                store, &mut sink, path, &path_str, &job.collection, &job.ext,
+                config_fp, 1, &e, summary,
+            )?;
+            return Ok(true);
+        }
+    };
+    let n = match crate::extract::pdf::page_count(path, &bins.pdfinfo) {
+        Ok(n) => n,
+        Err(e) => {
+            record_pdf_error(
+                store, &mut sink, path, &path_str, &job.collection, &job.ext,
+                config_fp, 1, &e, summary,
+            )?;
+            return Ok(true);
+        }
+    };
+
+    // Row: reuse on fingerprint match (resume), else wipe and restart at 1.
+    let (file_id, was_complete, mut next_page) = match store.get_file_by_path(&path_str)? {
+        Some(row) if row.fingerprint == file_fp => {
+            (row.id, row.complete, row.next_page.unwrap_or(1))
+        }
+        _ => {
+            store.delete_file_by_path(&path_str)?;
+            let id = store.upsert_file(&NewFile {
+                path: path_str.clone(),
+                collection: job.collection.clone(),
+                kind: FileKind::Pdf,
+                ext: job.ext.clone(),
+                size,
+                mtime,
+                fingerprint: file_fp,
+                complete: false,
+                next_page: Some(1),
+                skip_reason: None,
+                indexed_at: now_unix(),
+                error: None,
+            })?;
+            (id, false, 1)
+        }
+    };
+    if next_page < 1 {
+        next_page = 1;
+    }
+
+    // Backfill: a page below the cursor with no chunk is attempted first.
+    let existing = store.chunk_pages(file_id)?;
+    let mut start = next_page;
+    for p in 1..next_page {
+        if !existing.contains(&p) {
+            start = p;
+            break;
+        }
+    }
+
+    let limit = (pass_limit as i64)
+        .min(cfg.chunk.pdf.max_pages as i64)
+        .min(n as i64);
+    let title = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let mut failed: Option<String> = None;
+    let mut current = start;
+    while current <= limit {
+        if !page_needs_work(store, file_id, current)? {
+            // Already embedded (e.g. untouched side of a pipeline bump):
+            // advance the cursor without re-embedding.
+            let tx = store.begin()?;
+            store.set_pdf_progress(&tx, file_id, current + 1, false, None)?;
+            tx.commit()?;
+            current += 1;
+            continue;
+        }
+        match process_pdf_page(
+            store,
+            embedder,
+            cfg,
+            images_supported,
+            cache_dir,
+            &bins,
+            file_id,
+            path,
+            &title,
+            &job.collection,
+            &job.ext,
+            mtime,
+            current as u32,
+        )? {
+            PageOutcome::Done | PageOutcome::Skipped => current += 1,
+            PageOutcome::Failed(message) => {
+                failed = Some(message);
+                break;
+            }
+        }
+    }
+    next_page = current;
+
+    // Close out: complete iff no error and the cursor passed the ceiling.
+    let ceiling = (cfg.chunk.pdf.max_pages as i64).min(n as i64);
+    if let Some(message) = failed {
+        record_pdf_error(
+            store, &mut sink, path, &path_str, &job.collection, &job.ext,
+            config_fp, next_page, &Error::fatal(message), summary,
+        )?;
+        return Ok(true);
+    }
+    let complete = next_page > ceiling;
+    let tx = store.begin()?;
+    store.set_pdf_progress(&tx, file_id, next_page, complete, None)?;
+    tx.commit()?;
+    if complete {
+        summary.embedded += 1;
+        emit_ok(sink.json, path, &mut *sink.out)?;
+        if !was_complete && (n as i64) > cfg.chunk.pdf.max_pages as i64 {
+            let _ = writeln!(
+                err,
+                "warning: {} has {} pages, indexed first {} (chunk.pdf.max_pages)",
+                path.display(),
+                n,
+                cfg.chunk.pdf.max_pages,
+            );
+        }
+    }
+    Ok(complete)
+}
+
+/// True when the page has no chunk, or a chunk with no vector (an
+/// image-pipeline bump deletes vecs only). Pages with vectors are done.
+fn page_needs_work(store: &Store, file_id: i64, page: i64) -> Result<bool> {
+    if !store.chunk_pages(file_id)?.contains(&page) {
+        return Ok(true);
+    }
+    Ok(!store.page_has_vec(file_id, page)?)
+}
+
+/// Extract, embed, and commit one page in a single transaction. The raster
+/// is deleted after the commit (best-effort on failure too). Fatal
+/// embedder/DB errors propagate (the open transaction rolls back).
+#[allow(clippy::too_many_arguments)]
+fn process_pdf_page(
+    store: &Store,
+    embedder: &dyn Embedder,
+    cfg: &Config,
+    images_supported: bool,
+    cache_dir: &Path,
+    bins: &PdfBins,
+    file_id: i64,
+    path: &Path,
+    title: &str,
+    collection: &str,
+    ext: &str,
+    mtime: i64,
+    page: u32,
+) -> Result<PageOutcome> {
+    // Page text is always extracted (stored for FTS when non-whitespace).
+    let text = match crate::extract::pdf::page_text(path, page, &bins.pdftotext) {
+        Ok(t) => t,
+        Err(e) => return Ok(PageOutcome::Failed(e.to_string())),
+    };
+    let stored_text = if text.trim().is_empty() {
+        None
+    } else {
+        Some(text.trim().to_string())
+    };
+
+    // Render only when the page image may embed.
+    let render = cfg.chunk.pdf.embed_page_image && images_supported;
+    let png_path = if render {
+        match bins.pdftoppm.as_ref() {
+            Some(bin) => match crate::extract::pdf::render_page(
+                path,
+                page,
+                file_id,
+                cfg.chunk.pdf.render_dpi,
+                bin,
+                cache_dir,
+            ) {
+                Ok(p) => Some(p),
+                Err(e) => return Ok(PageOutcome::Failed(e.to_string())),
+            },
+            None => {
+                return Ok(PageOutcome::Failed(format!(
+                    "page {page} needs pdftoppm but it was not resolved"
+                )));
+            }
+        }
+    } else {
+        None
+    };
+
+    // Embed decision (spec §4.4): image+text, text-only, or skip.
+    enum Input {
+        Pdf { png: Vec<u8>, text: Option<String> },
+        Doc(String),
+        Skip,
+    }
+    let input = match (&png_path, cfg.chunk.pdf.embed_text, stored_text.clone()) {
+        (Some(png), _, text) => match std::fs::read(png) {
+            Ok(bytes) => Input::Pdf { png: bytes, text },
+            Err(e) => return Ok(PageOutcome::Failed(e.to_string())),
+        },
+        (None, true, Some(t)) => Input::Doc(t),
+        (None, _, _) => Input::Skip,
+    };
+    // The raster's job is done once its bytes are read (or on any exit
+    // below that leaves the page behind).
+    if let Some(p) = &png_path {
+        let _ = std::fs::remove_file(p);
+    }
+
+    let embedded: Option<Vec<f32>> = match input {
+        Input::Pdf { png, text } => {
+            let input = EmbedInput::PdfPage {
+                image_png: png,
+                text,
+            };
+            match embedder.embed(input) {
+                Ok(v) => Some(v),
+                Err(e) if e.is_file_error() => {
+                    return Ok(PageOutcome::Failed(e.to_string()));
+                }
+                Err(e) => return Err(e),
+            }
+        }
+        Input::Doc(t) => {
+            let input = EmbedInput::Document {
+                title: Some(title.to_string()),
+                text: t,
+            };
+            match embedder.embed(input) {
+                Ok(v) => Some(v),
+                Err(e) if e.is_file_error() => {
+                    return Ok(PageOutcome::Failed(e.to_string()));
+                }
+                Err(e) => return Err(e),
+            }
+        }
+        Input::Skip => None,
+    };
+
+    // One transaction: replace the page's chunks, store the vector, bump
+    // the cursor. Skipped pages keep no chunk (cursor still advances).
+    let tx = store.begin()?;
+    store.delete_page_chunks(&tx, file_id, page as i64)?;
+    let done = embedded.is_some();
+    if let Some(vector) = embedded {
+        let chunk_id = store.insert_chunk(
+            &tx,
+            NewChunk {
+                file_id,
+                ordinal: page as i64 - 1,
+                page: Some(page as i64),
+                kind: crate::types::ChunkKind::PdfPage,
+                text: stored_text,
+                start_byte: None,
+                end_byte: None,
+            },
+        )?;
+        store.insert_vec(&tx, chunk_id, &vector, FileKind::Pdf, ext, mtime, collection)?;
+    }
+    store.set_pdf_progress(&tx, file_id, page as i64 + 1, false, None)?;
+    tx.commit()?;
+    Ok(if done {
+        PageOutcome::Done
+    } else {
+        PageOutcome::Skipped
+    })
+}
+
+/// PDF file-error path: upsert the row with `complete=0`, the sticky
+/// cursor, and the message; emit the NDJSON error event; bump errors.
+/// Unlike `record_extract_error` this preserves `next_page` (resume),
+/// and unlike walk-skips the row stays (spec §4.4).
+#[allow(clippy::too_many_arguments)]
+fn record_pdf_error(
+    store: &Store,
+    sink: &mut EventSink<'_>,
+    path: &Path,
+    path_str: &str,
+    collection: &str,
+    ext: &str,
+    config_fp: &str,
+    next_page: i64,
+    err: &Error,
+    summary: &mut IndexSummary,
+) -> Result<()> {
+    let message = err.to_string();
+    let (size, mtime) = std::fs::metadata(path)
+        .map(|md| {
+            let mtime = md
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+                .map(|d| d.as_secs() as i64)
+                .unwrap_or(0);
+            (md.len(), mtime)
+        })
+        .unwrap_or((0, 0));
+    let file_fp = fingerprint::file_fingerprint(path_str, mtime, size, config_fp);
+    store.delete_file_by_path(path_str)?;
+    store.upsert_file(&NewFile {
+        path: path_str.to_string(),
+        collection: collection.to_string(),
+        kind: FileKind::Pdf,
+        ext: ext.to_string(),
+        size,
+        mtime,
+        fingerprint: file_fp,
+        complete: false,
+        next_page: Some(next_page),
+        skip_reason: None,
+        indexed_at: now_unix(),
+        error: Some(message.clone()),
+    })?;
+    summary.errors += 1;
+    if sink.json {
+        let _ = writeln!(
+            sink.out,
+            "{}",
+            serde_json::json!({
+                "event": "file",
+                "path": path_str,
+                "status": "error",
+                "reason": serde_json::Value::Null,
+                "error": message,
+            })
+        );
+    }
+    Ok(())
+}
 struct EventSink<'a> {
     json: bool,
     out: &'a mut dyn std::io::Write,
@@ -231,8 +758,75 @@ fn apply_pipeline_changes(
         conn.execute("DELETE FROM files", [])?;
     } else if text_changed {
         conn_delete_kind(store, "kind = 'text'")?;
+        // PDF page vectors stay; their stored text is rewritten from
+        // pdftotext so FTS follows the new text pipeline (best-effort:
+        // a missing poppler leaves stale text rather than failing the run).
+        refresh_pdf_texts(store, cfg);
     } else {
-        conn_delete_kind(store, "kind IN ('image', 'pdf_page')")?;
+        // Image-only change: image files re-extract from scratch, but PDF
+        // page chunks (and their text) stay — only their vectors are
+        // re-embedded from `next_page = 1`.
+        conn_delete_kind(store, "kind = 'image'")?;
+        reset_pdf_vecs(store)?;
+    }
+    Ok(())
+}
+
+/// Re-extract page text for every indexed PDF (text-pipeline bump keeps
+/// vectors; FTS must follow the new text). Best-effort per file: poppler
+/// failures leave that file's text stale and the walk continues. The
+/// `chunks_fts_au` trigger mirrors each rewrite into FTS.
+fn refresh_pdf_texts(store: &Store, cfg: &Config) {
+    let Ok(pdftotext) = crate::extract::pdf::resolve_tool(&cfg.extract, "pdftotext") else {
+        return;
+    };
+    let files: Vec<(i64, String)> = match (|| -> Result<Vec<(i64, String)>> {
+        let mut stmt = store
+            .conn()
+            .prepare("SELECT id, path FROM files WHERE kind = 'pdf'")?;
+        let rows = stmt
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<std::result::Result<Vec<(i64, String)>, _>>()?;
+        Ok(rows)
+    })() {
+        Ok(rows) => rows,
+        Err(_) => return,
+    };
+    for (file_id, path) in files {
+        let Ok(pages) = store.chunk_pages(file_id) else {
+            continue;
+        };
+        for page in pages {
+            let Ok(text) = crate::extract::pdf::page_text(
+                Path::new(&path),
+                page as u32,
+                &pdftotext,
+            ) else {
+                break;
+            };
+            let trimmed = text.trim();
+            if store.update_chunk_text(file_id, page, trimmed).is_err() {
+                break;
+            }
+        }
+    }
+}
+
+/// Image-pipeline bump for PDFs: drop every `pdf_page` vector and rewind
+/// each file's cursor to 1. Chunks (and their text) stay; the next run
+/// re-embeds pages whose vectors are missing (`page_needs_work`).
+fn reset_pdf_vecs(store: &Store) -> Result<()> {
+    let mut stmt = store
+        .conn()
+        .prepare("SELECT id FROM files WHERE kind = 'pdf'")?;
+    let ids: Vec<i64> = stmt
+        .query_map([], |r| r.get(0))?
+        .collect::<std::result::Result<_, _>>()?;
+    for id in ids {
+        store.delete_pdf_vecs(id)?;
+        let tx = store.begin()?;
+        store.set_pdf_progress(&tx, id, 1, false, None)?;
+        tx.commit()?;
     }
     Ok(())
 }
@@ -380,21 +974,14 @@ fn index_file(
                 return Ok(());
             }
         },
-        FileKind::Pdf => match extract::pdf::extract_pdf(
-            &path,
-            &cfg.chunk.text,
-            &cfg.chunk.pdf,
-            &cfg.chunk.image,
-            cache_dir,
-        ) {
-            Ok(chunks) => chunks,
-            Err(e) => {
-                record_extract_error(
-                    store, &mut sink, &path, &collection, kind, &ext, config_fp, e, summary,
-                );
-                return Ok(());
-            }
-        },
+        FileKind::Pdf => {
+            // Unreachable via run(): PDFs route through index_pdf_file
+            // (two-pass scheduler). Defensive: never silently embed a PDF
+            // as flat text.
+            return Err(Error::fatal(
+                "internal error: PDF reached text indexing (report a bug)",
+            ));
+        }
     };
 
     // --- embed phase (embedder failures are FATAL, not per-file) ---------

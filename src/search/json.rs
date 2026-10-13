@@ -39,6 +39,11 @@ pub fn render_json(out: &SearchOutput) -> String {
                     "filename": h.scores.filename,
                 },
                 "snippet": h.snippet,
+                "snippet_spans": h
+                    .snippet_spans
+                    .iter()
+                    .map(|(start, end)| json!({ "start": start, "end": end }))
+                    .collect::<Vec<_>>(),
             })
         })
         .collect();
@@ -116,6 +121,7 @@ mod tests {
                     filename: None,
                 },
                 snippet: "...pets are not permitted...".into(),
+                snippet_spans: vec![(4, 8)],
             }],
             warnings: vec!["browse_no_vec"],
         }
@@ -130,6 +136,7 @@ mod tests {
         assert!(h["scores"]["filename"].is_null());
         assert_eq!(h["scores"]["vec"], 0.81);
         assert_eq!(v["warnings"], serde_json::json!(["browse_no_vec"]));
+        assert_eq!(v["hits"][0]["snippet_spans"], serde_json::json!([{"start": 4, "end": 8}]));
     }
 
     #[test]

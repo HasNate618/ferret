@@ -19,6 +19,11 @@ use crate::search::Filters;
 pub struct ArmRow {
     pub chunk_id: i64,
     pub display: f64,
+    /// Full chunk text with FTS matches wrapped in \x1f…\x1e sentinels
+    /// (`highlight()` column 0; `None` for the vec arm, which has no match
+    /// info). `offsets()` is unusable on this SQLite (3.53.3 refuses it in
+    /// every context), so spans derive from these markers instead.
+    pub highlight: Option<String>,
 }
 
 /// Escape GLOB metacharacters so a literal string can be embedded in a
@@ -144,6 +149,7 @@ pub fn vec_arm(
         Ok(ArmRow {
             chunk_id: r.get(0)?,
             display: cosine,
+            highlight: None,
         })
     })?;
     rows.collect()
@@ -165,14 +171,18 @@ pub fn fts_arm(
         Some(cols) => format!("{cols}: {query}"),
         None => query.to_string(),
     };
+    // `highlight()` (unlike `offsets()`) is legal here; markers use ASCII
+    // control chars. Column 0 is the chunk text (schema order).
     let mut sql = String::from(
-        "SELECT fts.rowid, fts.rank FROM chunks_fts fts \
-         JOIN chunks c ON c.id = fts.rowid JOIN files f ON f.id = c.file_id \
-         WHERE chunks_fts MATCH ?",
+        "SELECT m.rowid, m.rank, m.h FROM \
+         (SELECT rowid, rank, highlight(chunks_fts, 0, char(31), char(30)) AS h \
+         FROM chunks_fts WHERE chunks_fts MATCH ?) m \
+         JOIN chunks c ON c.id = m.rowid JOIN files f ON f.id = c.file_id \
+         WHERE 1 = 1",
     );
     let mut params: Vec<Value> = vec![Value::Text(match_arg)];
     push_metadata(&mut sql, &mut params, true, filters);
-    sql.push_str(" ORDER BY fts.rank LIMIT ?");
+    sql.push_str(" ORDER BY m.rank LIMIT ?");
     params.push(Value::Integer(candidates as i64));
 
     let mut stmt = conn.prepare(&sql)?;
@@ -180,6 +190,7 @@ pub fn fts_arm(
         Ok(ArmRow {
             chunk_id: r.get(0)?,
             display: r.get(1)?,
+            highlight: r.get(2)?,
         })
     })?;
     rows.collect()

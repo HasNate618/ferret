@@ -137,6 +137,8 @@ and agents. Quickshell QML intentionally lives **outside** this repo.
 }
 ```
 
+`snippet_spans` (per hit) lists up to 5 `{start,end}` char offsets into that hit's `snippet`, marking FTS body-text matches for client highlighting. Always present; `[]` for image hits and hits with no FTS text match.
+
 Field notes for client authors:
 
 - `score` is a fused rank weight, **not a percent**. For a 0–1 bar

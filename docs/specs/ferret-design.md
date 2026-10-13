@@ -447,7 +447,8 @@ FTS operators (`"phrase"`, `OR`, `NOT`, `AND`) apply only to the keyword arm. `+
       "mtime": 1717200000,
       "score": 0.0412,
       "scores": { "vec": 0.81, "fts": -5.12, "filename": -1.04 },
-      "snippet": "...pets are not permitted without written consent..."
+      "snippet": "...pets are not permitted without written consent...",
+      "snippet_spans": [{"start": 4, "end": 8}]
     }
   ],
   "warnings": []
@@ -464,6 +465,7 @@ No other codes exist in v1.1. Parsers match codes on exact equality.
 - `page` is `null` for non-PDF.
 - `ordinal` is 0-based (`page` 12 with pages 1–12 present → `ordinal` 11).
 - `snippet` is ≤200 characters from `chunks.text` with the first match window. If `text` is null or empty, snippet is the basename (including image-only and empty `pdf_page`).
+- `snippet_spans` lists up to 5 `{start,end}` char offsets into `snippet` for FTS body-text matches (sourced from FTS `highlight()` markers, so they track stemming/phrase matches, not just raw terms). Always present; `[]` for image hits, vec-only hits, and filename-only hits.
 - Human mode (default): one hit per line, `path[:page]` then a short snippet. Not stable for clients; Quickshell must use `--json`. Do not print fused RRF as a percent.
 
 ### 6.5 Empty results and errors

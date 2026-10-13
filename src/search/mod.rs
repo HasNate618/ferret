@@ -51,6 +51,9 @@ pub struct Hit {
     pub score: f64, // fused RRF
     pub scores: HitScores,
     pub snippet: String,
+    /// Char offsets into `snippet` (≤5) from FTS `highlight()` markers;
+    /// empty when the hit has no FTS body-text match (images, vec-only hits).
+    pub snippet_spans: Vec<(usize, usize)>,
 }
 
 pub struct SearchOutput {
@@ -118,6 +121,9 @@ pub fn run_search(
     let mut vec_scores: HashMap<i64, f64> = HashMap::new();
     let mut fts_scores: HashMap<i64, f64> = HashMap::new();
     let mut fn_scores: HashMap<i64, f64> = HashMap::new();
+    // Highlighted full-chunk text per chunk, body-text arm only (the
+    // filename arm is not collected — its matches name other columns).
+    let mut fts_highlights: HashMap<i64, String> = HashMap::new();
 
     if want_vec {
         // A file-scoped error makes no sense for a query: escalate to fatal.
@@ -162,6 +168,9 @@ pub fn run_search(
             .enumerate()
         {
             fts_scores.insert(row.chunk_id, row.display);
+            if let Some(highlighted) = row.highlight {
+                fts_highlights.insert(row.chunk_id, highlighted);
+            }
             entries.push((row.chunk_id, Arm::Fts, i as u32 + 1));
         }
     }
@@ -205,6 +214,7 @@ pub fn run_search(
             &vec_scores,
             &fts_scores,
             &fn_scores,
+            fts_highlights.get(&chunk_id).map(|s| s.as_str()),
             &terms,
         )?);
     }
@@ -250,6 +260,7 @@ fn fts_err(e: rusqlite::Error) -> Error {
 }
 
 /// Fetch one hit's row data and build its snippet.
+#[allow(clippy::too_many_arguments)]
 fn load_hit(
     conn: &rusqlite::Connection,
     chunk_id: i64,
@@ -257,6 +268,7 @@ fn load_hit(
     vec_scores: &HashMap<i64, f64>,
     fts_scores: &HashMap<i64, f64>,
     fn_scores: &HashMap<i64, f64>,
+    fts_highlight: Option<&str>,
     terms: &[String],
 ) -> Result<Hit> {
     let row = conn
@@ -282,9 +294,16 @@ fn load_hit(
         .ok_or_else(|| Error::fatal(format!("chunk {chunk_id} vanished mid-search")))?;
     let (path, kind, chunk_kind, collection, ext, mtime, page, ordinal, text) = row;
 
-    let snippet = match text.filter(|t| !t.trim().is_empty()) {
-        Some(t) => snippet(&t, terms),
-        None => basename(&path),
+    let (snippet, snippet_spans) = match text.filter(|t| !t.trim().is_empty()) {
+        Some(t) => {
+            let (snippet, win_start) = snippet_window(&t, terms);
+            let spans = match fts_highlight {
+                Some(h) => highlight_spans(h, win_start, snippet.chars().count()),
+                None => Vec::new(),
+            };
+            (snippet, spans)
+        }
+        None => (basename(&path), Vec::new()),
     };
 
     Ok(Hit {
@@ -304,6 +323,7 @@ fn load_hit(
             filename: fn_scores.get(&chunk_id).copied(),
         },
         snippet,
+        snippet_spans,
     })
 }
 
@@ -316,11 +336,13 @@ fn basename(path: &str) -> String {
 }
 
 /// ≤200 characters from `text` around the first query-term match window;
-/// with no match, the first 200 characters (spec §6.4).
-fn snippet(text: &str, terms: &[String]) -> String {
+/// with no match, the first 200 characters (spec §6.4). Returns the
+/// snippet plus its start offset in `text` chars, so FTS match positions
+/// can be mapped into snippet space without rebuilding the window.
+fn snippet_window(text: &str, terms: &[String]) -> (String, usize) {
     let chars: Vec<char> = text.chars().collect();
     if chars.len() <= 200 {
-        return text.to_string();
+        return (text.to_string(), 0);
     }
     // Case-insensitive window search on byte indices (char-boundary safe),
     // then mapped back to char indices. Lowercasing can change char counts
@@ -339,5 +361,38 @@ fn snippet(text: &str, terms: &[String]) -> String {
     let best_char = best_byte.map(|b| text[..b].chars().count()).unwrap_or(0);
     let start = best_char.saturating_sub(60);
     let end = (start + 200).min(chars.len());
-    chars[start..end].iter().collect()
+    (chars[start..end].iter().collect(), start)
+}
+
+/// Char offsets into the snippet for FTS body-text matches (≤5, text
+/// order). `highlighted` is the full chunk text with matches wrapped in
+/// \x1f…\x1e sentinels; positions are mapped back to sentinel-free
+/// (original-text) space, then intersected with
+/// `[win_start, win_start + win_len)` and made snippet-relative.
+/// `None` markers (vec-only / filename-only hits) yield `[]`. A stray
+/// sentinel in indexed text could forge a span — still clamped to bounds.
+fn highlight_spans(highlighted: &str, win_start: usize, win_len: usize) -> Vec<(usize, usize)> {
+    let mut spans = Vec::new();
+    let mut orig: usize = 0;
+    let mut open: Option<usize> = None;
+    for ch in highlighted.chars() {
+        match ch {
+            '\u{1f}' => open = Some(orig),
+            '\u{1e}' => {
+                if let Some(start) = open.take() {
+                    if spans.len() < 5 && start < orig {
+                        let win_end = win_start + win_len;
+                        if orig > win_start && start < win_end {
+                            spans.push((
+                                start.max(win_start) - win_start,
+                                orig.min(win_end) - win_start,
+                            ));
+                        }
+                    }
+                }
+            }
+            _ => orig += 1,
+        }
+    }
+    spans
 }

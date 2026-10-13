@@ -293,3 +293,57 @@ fn search_json_browse_labels_no_vec() {
             .any(|w| w == "browse_no_vec")
     );
 }
+
+#[test]
+#[serial_test::serial]
+fn search_json_snippet_spans_highlight_match() {
+    let env = common::test_env();
+    std::fs::remove_file(env.root.join("pets.md")).unwrap();
+    std::fs::write(env.root.join("fox.txt"), "the quick brown fox jumps").unwrap();
+    ferret::cli::try_run(&["ferret", "index"]).unwrap();
+    let out = ferret::cli::try_run(&["ferret", "search", "--json", "quick"]).unwrap();
+    let v: serde_json::Value = serde_json::from_str(&out.stdout).unwrap();
+    let hit = &v["hits"].as_array().unwrap()[0];
+    let snippet = hit["snippet"].as_str().unwrap();
+    let spans = hit["snippet_spans"].as_array().unwrap();
+    assert!(!spans.is_empty());
+    assert!(spans.len() <= 5);
+    for s in spans {
+        let (start, end) = (
+            s["start"].as_u64().unwrap() as usize,
+            s["end"].as_u64().unwrap() as usize,
+        );
+        let chars: Vec<char> = snippet.chars().collect();
+        assert!(start < end && end <= chars.len());
+    }
+    // At least one span covers the matched term.
+    let chars: Vec<char> = snippet.chars().collect();
+    assert!(spans.iter().any(|s| {
+        let (a, b) = (
+            s["start"].as_u64().unwrap() as usize,
+            s["end"].as_u64().unwrap() as usize,
+        );
+        chars[a..b].iter().collect::<String>().to_lowercase() == "quick"
+    }));
+}
+
+#[test]
+#[serial_test::serial]
+fn search_json_spans_empty_for_image_hits() {
+    let env = common::test_env();
+    std::fs::remove_file(env.root.join("pets.md")).unwrap();
+    std::fs::write(
+        env.root.join("pic.png"),
+        std::fs::read("testdata/one.png").unwrap(),
+    )
+    .unwrap();
+    ferret::cli::try_run(&["ferret", "index"]).unwrap();
+    let out = ferret::cli::try_run(&["ferret", "search", "--json", "--kind", "image", "photo"])
+        .unwrap();
+    let v: serde_json::Value = serde_json::from_str(&out.stdout).unwrap();
+    let hits = v["hits"].as_array().unwrap();
+    assert!(!hits.is_empty());
+    for h in hits {
+        assert_eq!(h["snippet_spans"], serde_json::json!([]));
+    }
+}

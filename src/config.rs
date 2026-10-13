@@ -648,6 +648,7 @@ const ENV_PATHS: &[&str] = &[
     "extract.pdfinfo",
     "extract.pdftotext",
     "extract.pdftoppm",
+    "extract.ffmpeg_dir",
     "files.follow_symlinks",
     "files.include_hidden",
     "files.respect_gitignore",
@@ -683,6 +684,7 @@ fn coerce_env_value(path: &str, raw: &str) -> Result<Value> {
         | "extract.pdfinfo"
         | "extract.pdftotext"
         | "extract.pdftoppm"
+        | "extract.ffmpeg_dir"
         | "files.max_size"
         | "search.mode"
         | "chunk.text.mode"

@@ -305,7 +305,7 @@ Require **SQLite ≥ 3.38** (rusqlite `bundled` feature). Multi-value `--kind` /
 - `id`, `file_id` ON DELETE CASCADE
 - `ordinal` (INTEGER, **0-based**, contiguous per file in page/byte order)
 - `page` (nullable, 1-based; PDF only)
-- `kind` (`text|image|pdf_page`) — chunk kind, **never** copied into vec0
+- `kind` (`text|image|pdf_page|audio_segment`) — chunk kind, **never** copied into vec0
 - `text` (nullable; empty string stored as null)
 - `start_byte` / `end_byte` (UTF-8 byte offsets; **null** for `image` and `pdf_page`)
 
@@ -313,7 +313,7 @@ Require **SQLite ≥ 3.38** (rusqlite `bundled` feature). Multi-value `--kind` /
 
 **chunks_vec** — `vec0` with one `FLOAT[{dimensions}]` column and metadata:
 
-- `file_kind TEXT` — copy of **`files.kind`** (`text|image|pdf`), never `chunks.kind`. `--kind pdf` is `WHERE file_kind IN ('pdf')`.
+- `file_kind TEXT` — copy of **`files.kind`** (`text|image|pdf|audio`), never `chunks.kind`. `--kind pdf` is `WHERE file_kind IN ('pdf')`.
 - `ext TEXT`, `mtime INTEGER`, `collection TEXT`
 
 `rowid = chunks.id`. Metadata exists so KNN can take `WHERE file_kind = 'pdf' AND mtime >= ?` **during** the neighbor search, not after.
@@ -814,6 +814,9 @@ UTF-8 JSON, object keys sorted lexicographically, no insignificant whitespace, t
 
 ```json
 {
+  "audio_pipeline": {
+    "segment_secs": 30
+  },
   "backend": "llama_server",
   "dimensions": 768,
   "embed_recipe": "v1",

@@ -171,6 +171,7 @@ pub fn run(
         "image_pipeline",
         &fingerprint::image_pipeline_json(cfg, images_supported),
     )?;
+    store.set_meta("audio_pipeline", &fingerprint::audio_pipeline_json(cfg))?;
     store.set_meta(
         "images_supported",
         if images_supported { "true" } else { "false" },

@@ -42,6 +42,12 @@ pub fn image_pipeline_json(cfg: &Config, images_supported: bool) -> String {
     to_canonical_json(image_pipeline_value(cfg, images_supported))
 }
 
+/// The audio half of the fingerprint, standalone for store meta: everything
+/// that changes audio segmentation.
+pub fn audio_pipeline_json(cfg: &Config) -> String {
+    to_canonical_json(audio_pipeline_value(cfg))
+}
+
 /// `blake3(canonical_path || 0x1f || mtime || 0x1f || size || 0x1f ||
 /// config_fingerprint)` as hex; separators make the concatenation unambiguous.
 pub fn file_fingerprint(

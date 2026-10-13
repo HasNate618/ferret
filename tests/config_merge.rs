@@ -418,3 +418,21 @@ fn zero_segment_secs_is_fatal() {
     .unwrap_err();
     assert!(err.to_string().contains("segment_secs"));
 }
+
+#[test]
+fn env_overrides_audio_and_ffmpeg_dir() {
+    let (c, _) = load_from(
+        &LoadOpts { config_flag: None, index_flag: None },
+        &dirs(),
+        &|k| match k {
+            "FERRET__CHUNK__AUDIO__SEGMENT_SECS" => Some("45".into()),
+            "FERRET__EXTRACT__FFMPEG_DIR" => Some("/opt/ffmpeg".into()),
+            _ => None,
+        },
+        Path::new("/tmp/cwd"),
+        &|_| Err(ferret::error::Error::fatal("no files")),
+    )
+    .unwrap();
+    assert_eq!(c.chunk.audio.segment_secs, 45);
+    assert_eq!(c.extract.ffmpeg_dir, "/opt/ffmpeg");
+}

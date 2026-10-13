@@ -69,3 +69,4 @@ Status: `pending` | `active` | `done` | `blocked` | `parked`.
 - Audio Task 2: done. SPEC PASS, QUALITY PASS + 2 P2 test gaps closed (explicit-dir missing binary, 0/nan/inf gate). find_ffprobe stays pub for the Task 6 index arm.
 - Audio Task 3: done. SPEC OK, QUALITY OK + P2 fixed (error-path partial-clip cleanup with stub test). Symlink-guard divergence + 0-seg guard ruled no-change.
 - Audio Task 4: done. SPEC PASS, QUALITY PASS + P2 fixed (finite check in 768 gate).
+- Audio Task 5: done. SPEC PASS, QUALITY PASS, deviations accepted (no-dimensions parity with B.2; litert refusal inside shared llama arm).

@@ -241,8 +241,20 @@ fn execute(
                 None => !matches!(cfg.embedder.backend, Backend::Openai),
             };
             if json {
+                let roots: Vec<serde_json::Value> = cfg
+                    .index
+                    .roots
+                    .iter()
+                    .map(|r| {
+                        serde_json::json!({
+                            "path": r.path.to_string_lossy(),
+                            "collection": r.collection,
+                        })
+                    })
+                    .collect();
                 let out = serde_json::json!({
                     "index": cfg.index.path.to_string_lossy(),
+                    "roots": roots,
                     "model_id": cfg.embedder.model,
                     "dimensions": cfg.embedder.dimensions,
                     "backend": cfg.embedder.backend.to_string(),

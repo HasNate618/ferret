@@ -597,6 +597,7 @@ Global flags: `--config FILE` (replaces the user `{config_dir}` layer), `--index
   "dimensions": 768,
   "backend": "llama_server",
   "images_supported": true,
+  "roots": [{"path": "/home/nate/docs", "collection": "docs"}],
   "files": { "text": 0, "image": 0, "pdf": 0 },
   "chunks": 0,
   "incomplete": 0,

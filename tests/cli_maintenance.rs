@@ -93,6 +93,7 @@ fn status_json_shape_and_no_embed() {
     let v: serde_json::Value = serde_json::from_str(&out.stdout).unwrap();
     for k in [
         "index",
+        "roots",
         "model_id",
         "dimensions",
         "backend",
@@ -110,6 +111,39 @@ fn status_json_shape_and_no_embed() {
     assert!(v["files"].get("pdf").is_some());
     assert_eq!(v["files"]["text"], 1);
     assert_eq!(v["images_supported"], true);
+}
+
+#[test]
+#[serial]
+fn status_json_lists_roots() {
+    let env = common::test_env();
+    let notes = env.root.join("notes");
+    std::fs::create_dir_all(&notes).unwrap();
+    let more = env.root.join("more");
+    std::fs::create_dir_all(&more).unwrap();
+    std::fs::write(
+        &env.cfg,
+        format!(
+            "index.roots = [\"{}\", \"{}\"]\n",
+            notes.display(),
+            more.display()
+        ),
+    )
+    .unwrap();
+    ferret::cli::try_run(&["ferret", "index"]).unwrap();
+    let out = ferret::cli::try_run(&["ferret", "status", "--json"]).unwrap();
+    let v: serde_json::Value = serde_json::from_str(&out.stdout).unwrap();
+    let roots = v["roots"].as_array().unwrap();
+    assert_eq!(roots.len(), 2);
+    assert!(roots[0]["path"].as_str().unwrap().ends_with("notes"));
+    assert_eq!(roots[0]["collection"], "notes");
+    assert!(roots[1]["path"].as_str().unwrap().ends_with("more"));
+    assert_eq!(roots[1]["collection"], "more");
+    // Empty roots render as [].
+    std::fs::write(&env.cfg, "index.roots = []\n").unwrap();
+    let out = ferret::cli::try_run(&["ferret", "status", "--json"]).unwrap();
+    let v: serde_json::Value = serde_json::from_str(&out.stdout).unwrap();
+    assert_eq!(v["roots"], serde_json::json!([]));
 }
 
 #[test]

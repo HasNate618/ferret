@@ -91,9 +91,12 @@ index [PATH]... [--json] [--strict]
 search [QUERY] [filters] [--json] [--mode semantic|keyword|hybrid] [--code]
 rm PATH...                       delete rows (missing paths warn, exit 0)
 gc                               drop rows whose files are gone
-status [--json]                  counts, model, backend, no embedder call
+status [--json]                  counts, model, backend, roots, no embedder call
 config show | path
 ```
+
+`status --json` adds `"roots": [{"path": …, "collection": …}]`
+in config order (`[]` when no roots are configured).
 
 Exit codes: `0` success (including zero hits, per-file index errors,
 and `rm` of a missing path); `1` fatal (config, DB, embedder,

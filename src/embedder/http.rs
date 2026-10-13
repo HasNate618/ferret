@@ -86,6 +86,14 @@ impl HttpEmbedder {
         parse_embedding(resp)
     }
 
+    /// One audio segment round-trip with retries (Appendix B.6: the
+    /// base64 WAV part is the whole input).
+    fn post_audio(&self, wav: &[u8]) -> Result<Vec<f32>> {
+        let body = audio_body(&self.cfg, wav);
+        let resp = self.post_with_retries(&probe::embeddings_url(&self.cfg), &body)?;
+        parse_embedding(resp)
+    }
+
     /// llama_server / litert_lm text+image dialect (Appendices B.1–B.3).
     fn embed_llama(&self, input: EmbedInput) -> Result<Vec<f32>> {
         let sized = match &input {
@@ -99,6 +107,18 @@ impl HttpEmbedder {
             // page text (empty string when the page has no text).
             EmbedInput::PdfPage { image_png, text } => {
                 let raw = self.post_pdf_page(image_png, text.as_deref())?;
+                truncate_or_check(raw, self.backend, self.dimensions)?
+            }
+            // Appendix B.6: the base64 WAV part is the whole input; audio
+            // takes no text prefix (model rule: prefixes are text-only).
+            // Litert over HTTP is unconfirmed for audio: refuse per-file.
+            EmbedInput::Audio { wav_bytes } => {
+                if self.backend == Backend::LitertLm {
+                    return Err(Error::file(
+                        "backend `litert_lm` cannot embed audio over HTTP (unconfirmed)",
+                    ));
+                }
+                let raw = self.post_audio(wav_bytes)?;
                 truncate_or_check(raw, self.backend, self.dimensions)?
             }
             _ => match apply_prefix(self.profile, &input) {
@@ -131,6 +151,9 @@ impl HttpEmbedder {
                     "openai embeddings are text-only; image skipped",
                 ));
             }
+            EmbedInput::Audio { .. } => {
+                return Err(Error::file("backend `openai` cannot embed audio"));
+            }
             EmbedInput::PdfPage { text, .. } => prefixed_or_empty(self.profile, text.as_deref()),
             _ => match apply_prefix(self.profile, &input) {
                 Some(t) => t,
@@ -159,6 +182,11 @@ impl HttpEmbedder {
     /// Document-prefixed page text (marker alone when textless).
     fn embed_sglang(&self, input: EmbedInput) -> Result<Vec<f32>> {
         let item = match &input {
+            // The OAI embeddings endpoint has no audio input (a native
+            // `/encode` endpoint is a later milestone, not this one).
+            EmbedInput::Audio { .. } => {
+                return Err(Error::file("backend `sglang` cannot embed audio"));
+            }
             EmbedInput::PdfPage { image_png, text } => {
                 let prefixed = prefixed_or_empty(self.profile, text.as_deref());
                 let text = if prefixed.is_empty() {
@@ -293,6 +321,21 @@ pub(crate) fn image_body(cfg: &Config, png: &[u8]) -> serde_json::Value {
         "model": cfg.embedder.model,
         "encoding_format": "float",
         "input": [{ "content": [{ "type": "image_url", "image_url": { "url": url } }] }],
+    })
+}
+
+/// Frozen Appendix B.6 audio body, shared by the audio embed path and
+/// the capability probe: the base64 WAV part is the whole input, no text
+/// prefix of any kind (model rule: prefixes are text-only). Like the
+/// image body, no `dimensions` key (parity with B.2).
+pub(crate) fn audio_body(cfg: &Config, wav: &[u8]) -> serde_json::Value {
+    use base64::Engine as _;
+    let data = base64::engine::general_purpose::STANDARD.encode(wav);
+    json!({
+        "model": cfg.embedder.model,
+        "encoding_format": "float",
+        "input": [{ "content": [{ "type": "input_audio",
+            "input_audio": { "data": data } }] }],
     })
 }
 

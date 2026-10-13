@@ -58,7 +58,9 @@ pub fn apply_prefix(profile: PrefixProfile, input: &EmbedInput) -> Option<String
                 text: Some(text), ..
             },
         ) => Some(format!("task: search result | text: {text}")),
-        // Image-only inputs, and a PDF page with no text, have no text part.
+        // Image-only inputs, audio segments, and a PDF page with no text
+        // have no text part (model rule: prefixes are text-only).
+        (_, EmbedInput::Audio { .. }) => None,
         _ => None,
     }
 }
@@ -103,6 +105,14 @@ mod tests {
             },
         );
         assert!(s.is_none());
+    }
+
+    #[test]
+    fn audio_has_no_text_prefix() {
+        for profile in [PrefixProfile::EmbeddingGemma2, PrefixProfile::LitertLm] {
+            let s = apply_prefix(profile, &EmbedInput::Audio { wav_bytes: vec![1] });
+            assert!(s.is_none());
+        }
     }
 
     #[test]

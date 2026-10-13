@@ -960,3 +960,33 @@ send the same marker item. `dimensions` follows the B.5 rule below.
 
 No image parts. `dimensions` is sent only when it differs from 768
 (the example above omits it per this rule).
+
+### B.6 `llama_server` — audio segment (`Audio`)
+
+The base64 WAV part (16kHz mono, produced by `extract_audio`) is the
+whole input. **No text prefix of any kind**: audio takes no prefix
+(model rule — prefixes are text-only), so `prefix_profile` is ignored.
+Like B.2, no `dimensions` key.
+
+```json
+{
+  "model": "embeddinggemma-2",
+  "encoding_format": "float",
+  "input": [
+    {
+      "content": [
+        {
+          "type": "input_audio",
+          "input_audio": { "data": "UklGR..." }
+        }
+      ]
+    }
+  ]
+}
+```
+
+Refusal matrix (all per-file errors, never fatal): `openai` cannot
+embed audio (text-only endpoint); `sglang` cannot embed audio over
+`/v1/embeddings` (a native `/encode` endpoint is a later milestone);
+`litert_lm` cannot embed audio over HTTP (unconfirmed). The
+`probe_audio` capability check speaks this same body.

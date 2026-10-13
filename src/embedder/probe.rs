@@ -112,21 +112,14 @@ pub fn probe_wav() -> Vec<u8> {
 }
 
 /// Audio capability probe: POSTs the 1s sine as a llama `input_audio`
-/// part (Appendix B.6 shape; Task 5 unifies this body with `audio_body`).
-/// True only on 200 + a 768-d embedding. Non-llama backends refuse audio
+/// part (Appendix B.6 body, shared with the embed path). True only on
+/// 200 + a 768-d finite embedding. Non-llama backends refuse audio
 /// (Task 5) and return false without dialing.
 pub fn probe_audio(client: &Client, cfg: &Config) -> bool {
-    use base64::Engine as _;
     if cfg.embedder.backend != crate::types::Backend::LlamaServer {
         return false;
     }
-    let data = base64::engine::general_purpose::STANDARD.encode(probe_wav());
-    let body = json!({
-        "model": cfg.embedder.model,
-        "encoding_format": "float",
-        "input": [{ "content": [{ "type": "input_audio",
-            "input_audio": { "data": data } }] }],
-    });
+    let body = super::http::audio_body(cfg, &probe_wav());
     let resp = authed(client.post(embeddings_url(cfg)), cfg)
         .json(&body)
         .send();

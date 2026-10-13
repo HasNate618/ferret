@@ -719,3 +719,68 @@ fn probe_audio_false_without_posting_for_openai() {
     assert!(!probe_audio(&client, &cfg));
     mock.assert_hits(0);
 }
+
+#[test]
+fn llama_audio_posts_input_audio_part() {
+    use base64::Engine as _;
+    use ferret::embedder::{EmbedInput, probe};
+    let server = httpmock::MockServer::start();
+    let wav = probe::probe_wav();
+    let data = base64::engine::general_purpose::STANDARD.encode(&wav);
+    let mock = server.mock(|when, then| {
+        when.method("POST")
+            .path("/v1/embeddings")
+            .json_body(serde_json::json!({
+                "model": "embeddinggemma-2",
+                "encoding_format": "float",
+                "input": [{ "content": [{ "type": "input_audio",
+                    "input_audio": { "data": data } }] }]
+            }));
+        then.status(200).json_body(serde_json::json!({
+            "data": [{ "embedding": vec![0.1; 768] }]
+        }));
+    });
+    let cfg = test_cfg(&server.base_url());
+    let e = HttpEmbedder::new(&cfg).unwrap();
+    let v = e.embed(EmbedInput::Audio { wav_bytes: wav }).unwrap();
+    assert_eq!(v.len(), cfg.embedder.dimensions as usize);
+    mock.assert();
+}
+
+#[test]
+fn openai_audio_is_file_error_without_posting() {
+    use ferret::embedder::{EmbedInput, Embedder};
+    let server = httpmock::MockServer::start();
+    let mock = server.mock(|when, then| {
+        when.method("POST").path("/v1/embeddings");
+        then.status(200).json_body(serde_json::json!({"data": []}));
+    });
+    let mut cfg = test_cfg(&server.base_url());
+    cfg.embedder.backend = Backend::Openai;
+    let e = HttpEmbedder::new(&cfg).unwrap();
+    let err = e
+        .embed(EmbedInput::Audio { wav_bytes: vec![1, 2, 3] })
+        .unwrap_err();
+    assert!(err.is_file_error());
+    mock.assert_hits(0);
+}
+
+#[test]
+fn sglang_and_litert_audio_are_file_errors_without_posting() {
+    use ferret::embedder::{EmbedInput, Embedder};
+    for backend in [Backend::Sglang, Backend::LitertLm] {
+        let server = httpmock::MockServer::start();
+        let mock = server.mock(|when, then| {
+            when.method("POST").path("/v1/embeddings");
+            then.status(200).json_body(serde_json::json!({"data": []}));
+        });
+        let mut cfg = test_cfg(&server.base_url());
+        cfg.embedder.backend = backend;
+        let e = HttpEmbedder::new(&cfg).unwrap();
+        let err = e
+            .embed(EmbedInput::Audio { wav_bytes: vec![1, 2, 3] })
+            .unwrap_err();
+        assert!(err.is_file_error(), "backend {backend:?} should refuse audio");
+        mock.assert_hits(0);
+    }
+}

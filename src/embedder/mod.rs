@@ -32,6 +32,9 @@ pub enum EmbedInput {
         image_png: Vec<u8>,
         text: Option<String>,
     },
+    /// One audio segment: 16kHz mono WAV bytes; no text prefix (model
+    /// rule: prefixes are text-only).
+    Audio { wav_bytes: Vec<u8> },
 }
 
 /// An embedding backend. Every output is a single L2-normalized vector of

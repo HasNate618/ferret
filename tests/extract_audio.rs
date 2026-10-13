@@ -149,3 +149,53 @@ fn audio_duration_zero_and_nan_are_file_errors() {
         );
     }
 }
+
+#[test]
+fn sweep_wav_yields_three_timestamped_chunks() {
+    use ferret::extract::audio::{extract_audio, find_ffmpeg};
+    use ferret::types::ChunkKind;
+    if find_ffmpeg(None).is_err() {
+        eprintln!("skip: no ffmpeg");
+        return;
+    }
+    let tmp = tmpdir();
+    let chunks = extract_audio(
+        Path::new("testdata/sweep.wav"),
+        30,
+        &tmp.path().join("cache"),
+        None,
+    )
+    .unwrap();
+    assert_eq!(chunks.len(), 3);
+    assert!(
+        chunks
+            .iter()
+            .all(|c| c.kind == ChunkKind::AudioSegment && c.text.is_none())
+    );
+    assert_eq!(
+        chunks
+            .iter()
+            .map(|c| (c.t_start_ms, c.t_end_ms))
+            .collect::<Vec<_>>(),
+        vec![
+            (Some(0), Some(30000)),
+            (Some(30000), Some(60000)),
+            (Some(60000), Some(65000))
+        ]
+    );
+    assert!(
+        chunks
+            .iter()
+            .all(|c| c.image_bytes.as_ref().is_some_and(|b| b.len() > 44))
+    );
+}
+
+#[test]
+fn corrupt_wav_is_file_error() {
+    use ferret::extract::audio::extract_audio;
+    let tmp = tmpdir();
+    let bad = tmp.path().join("bad.wav");
+    std::fs::write(&bad, b"RIFF-not-really-a-wav").unwrap();
+    let err = extract_audio(&bad, 30, &tmp.path().join("cache"), None).unwrap_err();
+    assert!(err.is_file_error());
+}

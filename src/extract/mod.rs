@@ -31,8 +31,12 @@ pub struct Chunk {
     pub end_byte: Option<i64>,
     pub page: Option<i64>,
     pub embed: EmbedDecision,
-    /// PNG bytes for image chunks (and Task 15 PDF pages): the exact
-    /// payload sent to the embedder. `None` for text chunks.
+    /// Segment timestamps in milliseconds (audio only; `None` otherwise).
+    pub t_start_ms: Option<i64>,
+    pub t_end_ms: Option<i64>,
+    /// PNG bytes for image chunks (and Task 15 PDF pages), WAV bytes for
+    /// audio segments: the exact payload sent to the embedder (the field
+    /// name is historical; renaming it is out of scope). `None` for text.
     pub image_bytes: Option<Vec<u8>>,
 }
 

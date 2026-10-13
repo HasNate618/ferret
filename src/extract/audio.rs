@@ -6,6 +6,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use crate::error::{Error, Result};
+use crate::extract::{Chunk, EmbedDecision, ExtractOutcome};
+use crate::types::ChunkKind;
 
 /// Resolve `ffmpeg`: `{ffmpeg_dir}/ffmpeg` when a dir is given, else a PATH
 /// lookup. Anything missing is `ffmpeg not found` as `Error::file` (a
@@ -92,4 +94,95 @@ fn is_executable_file(path: &Path) -> bool {
 #[cfg(not(unix))]
 fn is_executable_file(path: &Path) -> bool {
     path.is_file()
+}
+
+/// Segment `path` into ~`segment_secs` clips of 16kHz mono WAV, one
+/// [`Chunk`] per segment (`ceil(duration / segment_secs)` rows, tails under
+/// 0.5s dropped). Clip bytes are loaded into `image_bytes` — the exact
+/// embedder payload, mirroring image chunks. Segment WAVs live under
+/// `cache_dir/audio/{hash}-{idx}.wav` (path-hash scoped, like the PDF raster
+/// dir); the caller deletes them after the file transaction commits.
+/// Undecodable input is `Error::file` (ffprobe/ffmpeg nonzero exits).
+pub fn extract_audio(
+    path: &Path,
+    segment_secs: u64,
+    cache_dir: &Path,
+    ffmpeg_dir: Option<&Path>,
+) -> Result<ExtractOutcome> {
+    if segment_secs == 0 {
+        return Err(Error::fatal("extract_audio: segment_secs must be at least 1"));
+    }
+    let duration = audio_duration(ffmpeg_dir, path)?;
+    let ffmpeg = find_ffmpeg(ffmpeg_dir)?;
+    let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let dir = cache_dir.join("audio");
+    std::fs::create_dir_all(&dir).map_err(|e| {
+        Error::file(format!("cannot create audio cache {}: {e}", dir.display()))
+    })?;
+    // Scope clip names to the file so concurrent files never collide.
+    let hash = blake3::hash(canonical.to_string_lossy().as_bytes()).to_hex();
+    let tag = &hash[..16.min(hash.len())];
+
+    let mut chunks = Vec::new();
+    let mut start = 0.0;
+    let mut idx = 0u32;
+    while start < duration {
+        let len = (duration - start).min(segment_secs as f64);
+        if len < 0.5 {
+            break;
+        }
+        let stem = dir.join(format!("{tag}-{idx}"));
+        // Refuse to cut through a symlinked output path (cache plant).
+        if stem.with_extension("wav").is_symlink() {
+            return Err(Error::file(format!(
+                "refusing to cut {}: output path is a symlink",
+                path.display()
+            )));
+        }
+        let out = Command::new(&ffmpeg)
+            .arg("-v")
+            .arg("error")
+            .arg("-y")
+            .arg("-ss")
+            .arg(start.to_string())
+            .arg("-t")
+            .arg(len.to_string())
+            .arg("-i")
+            .arg(&canonical)
+            .arg("-ar")
+            .arg("16000")
+            .arg("-ac")
+            .arg("1")
+            .arg("-c:a")
+            .arg("pcm_s16le")
+            .arg(stem.with_extension("wav"))
+            .stdin(Stdio::null())
+            .output()
+            .map_err(|e| Error::file(format!("could not run {}: {e}", ffmpeg.display())))?;
+        let clip = stem.with_extension("wav");
+        if !out.status.success() || !clip.is_file() {
+            return Err(Error::file(format!(
+                "ffmpeg failed for {} offset {start}s (exited {})",
+                path.display(),
+                out.status.code().unwrap_or(-1)
+            )));
+        }
+        let bytes = std::fs::read(&clip).map_err(|e| {
+            Error::file(format!("cannot read segment {}: {e}", clip.display()))
+        })?;
+        chunks.push(Chunk {
+            kind: ChunkKind::AudioSegment,
+            text: None,
+            start_byte: None,
+            end_byte: None,
+            page: None,
+            embed: EmbedDecision::Vec,
+            t_start_ms: Some((start * 1000.0).round() as i64),
+            t_end_ms: Some(((start + len) * 1000.0).round() as i64),
+            image_bytes: Some(bytes),
+        });
+        start += segment_secs as f64;
+        idx += 1;
+    }
+    Ok(chunks)
 }

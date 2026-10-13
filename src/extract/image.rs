@@ -99,6 +99,8 @@ pub fn extract_image(
         end_byte: None,
         page: None,
         embed: EmbedDecision::Vec,
+        t_start_ms: None,
+        t_end_ms: None,
         image_bytes: Some(png),
     }])
 }

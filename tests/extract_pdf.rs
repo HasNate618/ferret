@@ -106,3 +106,43 @@ fn poppler_dir_is_preferred_over_path() {
     cfg.poppler_dir = dir.to_str().unwrap().to_string();
     assert_eq!(resolve_tool(&cfg, "pdfinfo").unwrap(), dir.join("pdfinfo"));
 }
+
+/// Write an executable shell stub: `name` echoes `stdout` and exits 0.
+fn write_stub(dir: &Path, name: &str, stdout: &str) {
+    let path = dir.join(name);
+    std::fs::write(&path, format!("#!/bin/sh\nprintf '%s' \"{stdout}\"\n")).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = std::fs::metadata(&path).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&path, perms).unwrap();
+    }
+}
+
+#[test]
+fn resolve_priority_is_explicit_then_poppler_dir_then_path() {
+    // Fully hermetic: stub binaries in tempdirs, no host poppler needed.
+    let tmp = tempfile::tempdir().unwrap();
+    let tools = tmp.path().join("tools");
+    std::fs::create_dir_all(&tools).unwrap();
+    write_stub(&tools, "pdfinfo", "Pages: 7\n");
+    write_stub(&tools, "pdftotext", "stub text");
+    write_stub(&tools, "pdftoppm", "");
+
+    // poppler_dir wins over PATH (whatever PATH holds).
+    let mut cfg = extract_cfg();
+    cfg.poppler_dir = tools.to_str().unwrap().to_string();
+    assert_eq!(resolve_tool(&cfg, "pdfinfo").unwrap(), tools.join("pdfinfo"));
+    // ...and the stub actually answers through the real call path.
+    assert_eq!(
+        page_count(Path::new("whatever.pdf"), &tools.join("pdfinfo")).unwrap(),
+        7
+    );
+
+    // Explicit setting beats poppler_dir — including with a bogus value.
+    cfg.pdftotext = "/no/such/pdftotext".to_string();
+    let err = resolve_tool(&cfg, "pdftotext").unwrap_err();
+    assert!(err.to_string().contains("pdftotext"), "unexpected: {err}");
+    assert!(err.to_string().contains("/no/such/pdftotext"), "unexpected: {err}");
+}

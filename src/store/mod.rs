@@ -376,13 +376,26 @@ impl Store {
     /// Page numbers present in `chunks` for a file, ascending. Drives the
     /// PDF backfill check (a page below `next_page` with no chunk).
     pub fn chunk_pages(&self, file_id: i64) -> Result<Vec<i64>> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT page FROM chunks WHERE file_id = ?1 AND page IS NOT NULL")?;
+        let mut stmt = self.conn.prepare(
+            "SELECT page FROM chunks WHERE file_id = ?1 AND page IS NOT NULL ORDER BY page",
+        )?;
         let pages = stmt
             .query_map([file_id], |r| r.get(0))?
             .collect::<std::result::Result<Vec<Option<i64>>, _>>()?;
         Ok(pages.into_iter().flatten().collect())
+    }
+
+    /// Chunk id for one file page, if any. Point query for the per-page
+    /// scheduler (cheaper than re-scanning `chunk_pages` per page).
+    pub fn chunk_id_for_page(&self, file_id: i64, page: i64) -> Result<Option<i64>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id FROM chunks WHERE file_id = ?1 AND page = ?2 LIMIT 1",
+        )?;
+        let mut rows = stmt.query(rusqlite::params![file_id, page])?;
+        Ok(match rows.next()? {
+            Some(row) => Some(row.get(0)?),
+            None => None,
+        })
     }
 
     /// True when the page has a chunk WITH a vector. A chunk without a vec

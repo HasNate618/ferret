@@ -9,13 +9,11 @@ use std::process::{Command, Stdio};
 use crate::config::ExtractConfig;
 use crate::error::{Error, Result};
 
-/// Poppler tool names as used in config keys (`extract.pdfinfo` …).
-pub const TOOLS: [&str; 3] = ["pdfinfo", "pdftotext", "pdftoppm"];
-
 /// Resolve one poppler binary: the explicit `extract.<name>` setting wins,
 /// else `{poppler_dir}/<name>` when `poppler_dir` is set, else a PATH
-/// lookup. Anything missing is `<name> not found` (an extract error, not
-/// a usage error — the index may predate the poppler install).
+/// lookup. Anything missing is `<name> not found` as `Error::fatal` — the
+/// indexer reclassifies it into the per-file extract-error path (a missing
+/// binary must not abort the walk).
 pub fn resolve_tool(cfg: &ExtractConfig, name: &str) -> Result<PathBuf> {
     let explicit = match name {
         "pdfinfo" => &cfg.pdfinfo,

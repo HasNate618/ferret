@@ -59,7 +59,7 @@ pub fn run(
     // Pipeline granularity: delete the chunk side a changed fingerprint
     // invalidates, so per-file re-extraction has a clean slate while the
     // other side's vec rows survive.
-    apply_pipeline_changes(&store, cfg, images_supported, &config_fp)?;
+    apply_pipeline_changes(&store, cfg, images_supported, &config_fp, err)?;
 
     let dirs = ferret_dirs(&|k| std::env::var(k).ok());
     let mut summary = IndexSummary::default();
@@ -256,6 +256,22 @@ fn resolve_pdf_bins(
     })
 }
 
+/// One page's embed input: image+text, image-only (no prefix), text-only,
+/// or skip (no chunk, cursor still advances).
+enum PageInput {
+    Pdf { png: Vec<u8>, text: Option<String> },
+    Img(Vec<u8>),
+    Doc(String),
+    Skip,
+}
+
+/// Best-effort raster cleanup (spec §4.4: cache rasters never linger).
+fn remove_raster(png_path: &Option<PathBuf>) {
+    if let Some(p) = png_path {
+        let _ = std::fs::remove_file(p);
+    }
+}
+
 /// One page's outcome: embedded, deliberately skipped (no chunk, cursor
 /// advances), or file-failing (record the file error, stop this file).
 enum PageOutcome {
@@ -423,6 +439,9 @@ fn index_pdf_file(
     next_page = current;
 
     // Close out: complete iff no error and the cursor passed the ceiling.
+    // A pass that ends mid-file (pass 1, or a capped max_pages) leaves
+    // complete=0 with the error cleared: reaching here means every
+    // attempted page committed, so a stale failure must not linger.
     let ceiling = (cfg.chunk.pdf.max_pages as i64).min(n as i64);
     if let Some(message) = failed {
         record_pdf_error(
@@ -453,8 +472,10 @@ fn index_pdf_file(
 
 /// True when the page has no chunk, or a chunk with no vector (an
 /// image-pipeline bump deletes vecs only). Pages with vectors are done.
+/// Point queries per page (indexed); the full page list is only scanned
+/// once per file for the backfill check.
 fn page_needs_work(store: &Store, file_id: i64, page: i64) -> Result<bool> {
-    if !store.chunk_pages(file_id)?.contains(&page) {
+    if store.chunk_id_for_page(file_id, page)?.is_none() {
         return Ok(true);
     }
     Ok(!store.page_has_vec(file_id, page)?)
@@ -515,28 +536,31 @@ fn process_pdf_page(
         None
     };
 
-    // Embed decision (spec §4.4): image+text, text-only, or skip.
-    enum Input {
-        Pdf { png: Vec<u8>, text: Option<String> },
-        Doc(String),
-        Skip,
-    }
-    let input = match (&png_path, cfg.chunk.pdf.embed_text, stored_text.clone()) {
-        (Some(png), _, text) => match std::fs::read(png) {
-            Ok(bytes) => Input::Pdf { png: bytes, text },
-            Err(e) => return Ok(PageOutcome::Failed(e.to_string())),
+    // Embed decision (spec §4.4): image+text, image-only, text-only,
+    // or skip. `embed_text = false` with images sends the page as a
+    // bare image (no document prefix); the stored FTS text is unaffected.
+    let png_bytes = match &png_path {
+        Some(p) => match std::fs::read(p) {
+            Ok(bytes) => Some(bytes),
+            Err(e) => {
+                remove_raster(&png_path);
+                return Ok(PageOutcome::Failed(e.to_string()));
+            }
         },
-        (None, true, Some(t)) => Input::Doc(t),
-        (None, _, _) => Input::Skip,
+        None => None,
     };
-    // The raster's job is done once its bytes are read (or on any exit
-    // below that leaves the page behind).
-    if let Some(p) = &png_path {
-        let _ = std::fs::remove_file(p);
-    }
+    let input = match (png_bytes, cfg.chunk.pdf.embed_text, stored_text.clone()) {
+        (Some(bytes), false, _) => PageInput::Img(bytes),
+        (Some(bytes), true, text) => PageInput::Pdf {
+            png: bytes,
+            text,
+        },
+        (None, true, Some(t)) => PageInput::Doc(t),
+        (None, _, _) => PageInput::Skip,
+    };
 
     let embedded: Option<Vec<f32>> = match input {
-        Input::Pdf { png, text } => {
+        PageInput::Pdf { png, text } => {
             let input = EmbedInput::PdfPage {
                 image_png: png,
                 text,
@@ -544,12 +568,33 @@ fn process_pdf_page(
             match embedder.embed(input) {
                 Ok(v) => Some(v),
                 Err(e) if e.is_file_error() => {
+                    remove_raster(&png_path);
                     return Ok(PageOutcome::Failed(e.to_string()));
                 }
-                Err(e) => return Err(e),
+                Err(e) => {
+                    remove_raster(&png_path);
+                    return Err(e);
+                }
             }
         }
-        Input::Doc(t) => {
+        PageInput::Img(bytes) => {
+            let input = EmbedInput::Image {
+                bytes,
+                mime: "image/png".to_string(),
+            };
+            match embedder.embed(input) {
+                Ok(v) => Some(v),
+                Err(e) if e.is_file_error() => {
+                    remove_raster(&png_path);
+                    return Ok(PageOutcome::Failed(e.to_string()));
+                }
+                Err(e) => {
+                    remove_raster(&png_path);
+                    return Err(e);
+                }
+            }
+        }
+        PageInput::Doc(t) => {
             let input = EmbedInput::Document {
                 title: Some(title.to_string()),
                 text: t,
@@ -562,7 +607,7 @@ fn process_pdf_page(
                 Err(e) => return Err(e),
             }
         }
-        Input::Skip => None,
+        PageInput::Skip => None,
     };
 
     // One transaction: replace the page's chunks, store the vector, bump
@@ -587,6 +632,9 @@ fn process_pdf_page(
     }
     store.set_pdf_progress(&tx, file_id, page as i64 + 1, false, None)?;
     tx.commit()?;
+    // The raster lives until the page transaction commits (spec §4.4);
+    // failure exits above delete it on the way out, so a retry re-renders.
+    remove_raster(&png_path);
     Ok(if done {
         PageOutcome::Done
     } else {
@@ -737,6 +785,7 @@ fn apply_pipeline_changes(
     cfg: &Config,
     images_supported: bool,
     config_fp: &str,
+    err: &mut dyn std::io::Write,
 ) -> Result<()> {
     let stored_fp = store.get_meta("config_fingerprint")?;
     let Some(stored_fp) = stored_fp else {
@@ -760,10 +809,14 @@ fn apply_pipeline_changes(
         conn.execute("DELETE FROM files", [])?;
     } else if text_changed {
         conn_delete_kind(store, "kind = 'text'")?;
-        // PDF page vectors stay; their stored text is rewritten from
-        // pdftotext so FTS follows the new text pipeline (best-effort:
-        // a missing poppler leaves stale text rather than failing the run).
-        refresh_pdf_texts(store, cfg);
+        // `embed_text` flips change page vectors (B.3 with text vs B.2
+        // image-only): re-embed PDF pages like an image bump. Other text
+        // bumps keep pdf vecs and only refresh stored FTS text.
+        if pdf_embed_text_changed(store, cfg) {
+            reset_pdf_vecs(store)?;
+        } else {
+            refresh_pdf_texts(store, cfg, err);
+        }
     } else {
         // Image-only change: image files re-extract from scratch, but PDF
         // page chunks (and their text) stay — only their vectors are
@@ -774,12 +827,25 @@ fn apply_pipeline_changes(
     Ok(())
 }
 
+/// True when the stored text pipeline's `pdf.embed_text` differs from the
+/// merged config's. A flip changes page vectors (text in/out of the
+/// embedding), so PDF pages must re-embed despite the text-only bump.
+fn pdf_embed_text_changed(store: &Store, cfg: &Config) -> bool {
+    store
+        .get_meta("text_pipeline")
+        .ok()
+        .flatten()
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+        .and_then(|v| v.pointer("/pdf/embed_text")?.as_bool())
+        .is_some_and(|old| old != cfg.chunk.pdf.embed_text)
+}
 /// Re-extract page text for every indexed PDF (text-pipeline bump keeps
-/// vectors; FTS must follow the new text). Best-effort per file: poppler
-/// failures leave that file's text stale and the walk continues. The
-/// `chunks_fts_au` trigger mirrors each rewrite into FTS.
-fn refresh_pdf_texts(store: &Store, cfg: &Config) {
+/// vectors; FTS must follow the new text). Best-effort per page: poppler
+/// failures warn once and leave that page's text stale rather than
+/// failing the run. The `chunks_fts_au` trigger mirrors each rewrite.
+fn refresh_pdf_texts(store: &Store, cfg: &Config, err: &mut dyn std::io::Write) {
     let Ok(pdftotext) = crate::extract::pdf::resolve_tool(&cfg.extract, "pdftotext") else {
+        let _ = writeln!(err, "warning: skipping PDF text refresh (pdftotext not found)");
         return;
     };
     let files: Vec<(i64, String)> = match (|| -> Result<Vec<(i64, String)>> {
@@ -804,7 +870,12 @@ fn refresh_pdf_texts(store: &Store, cfg: &Config) {
                 page as u32,
                 &pdftotext,
             ) else {
-                break;
+                let _ = writeln!(
+                    err,
+                    "warning: PDF text refresh failed for {} page {page} (keeping stale text)",
+                    Path::new(&path).display(),
+                );
+                continue;
             };
             let trimmed = text.trim();
             if store.update_chunk_text(file_id, page, trimmed).is_err() {

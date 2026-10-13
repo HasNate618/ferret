@@ -121,3 +121,31 @@ fn audio_duration_garbage_is_file_error() {
             .is_file_error()
     );
 }
+
+#[test]
+#[serial]
+fn explicit_dir_without_ffmpeg_is_file_error() {
+    let tmp = tmpdir();
+    let tools = tmp.path().join("tools");
+    std::fs::create_dir_all(&tools).unwrap();
+    let err = find_ffmpeg(Some(tools.as_path())).unwrap_err();
+    assert!(err.is_file_error());
+    assert!(err.to_string().contains("not found"), "unexpected: {err}");
+}
+
+#[test]
+#[serial]
+fn audio_duration_zero_and_nan_are_file_errors() {
+    for output in ["printf '0'", "printf 'nan'", "printf 'inf'"] {
+        let tmp = tmpdir();
+        let tools = tmp.path().join("tools");
+        std::fs::create_dir_all(&tools).unwrap();
+        write_stub(&tools, "ffprobe", output);
+        let clip = tmp.path().join("clip.wav");
+        std::fs::write(&clip, b"RIFF").unwrap();
+        assert!(
+            audio_duration(Some(tools.as_path()), &clip).unwrap_err().is_file_error(),
+            "output {output:?} should be a file error"
+        );
+    }
+}

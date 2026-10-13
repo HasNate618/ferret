@@ -62,6 +62,9 @@ pub enum WalkEvent {
         collection: String,
         kind: FileKind,
         ext: String,
+        /// File size in bytes at walk time (0 when the file could not be
+        /// statted). Carried so totals need no second stat pass.
+        size: u64,
     },
     Skip {
         path: PathBuf,
@@ -349,6 +352,7 @@ impl Walker<'_> {
             collection: collection.to_string(),
             kind,
             ext,
+            size: std::fs::metadata(path).map(|m| m.len()).unwrap_or(0),
         });
         Ok(())
     }

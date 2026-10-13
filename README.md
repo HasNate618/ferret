@@ -101,7 +101,8 @@ schema/model mismatch, `--strict` with errors); `2` usage.
 
 `ferret index` prints `seen / skipped / embedded / errors` to stderr,
 or one NDJSON `{"event":"file",…}` object per file on stdout with
-`--json`. Statuses: `ok`, `skip` (with `reason`: `unsupported_ext`,
+`--json` (preceded by a single `{"event":"plan","files":n,"bytes":m}`
+totals line; parsers MUST ignore unknown `event` values). Statuses: `ok`, `skip` (with `reason`: `unsupported_ext`,
 `skip_rule`, `no_image_backend`, `heic_skip`, `no_magick`,
 `gitignore`, `include_globs`), `error` (with message; the DB row is
 `complete=0`, walk continues).

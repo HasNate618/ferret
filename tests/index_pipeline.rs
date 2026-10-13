@@ -4,6 +4,7 @@
 mod common;
 
 use ferret::cli::try_run;
+use ferret::embedder::FakeEmbedder;
 use rusqlite::OptionalExtension;
 
 /// Read `config_fingerprint` straight from the index meta table.
@@ -134,7 +135,10 @@ fn index_json_ndjson_events() {
         .filter(|l| !l.trim().is_empty())
         .collect();
     assert!(!lines.is_empty());
-    for line in lines {
+    // v1.1: the first line is the plan event with progress totals.
+    let plan: serde_json::Value = serde_json::from_str(lines[0]).unwrap();
+    assert_eq!(plan["event"], "plan");
+    for line in &lines[1..] {
         let v: serde_json::Value = serde_json::from_str(line).unwrap();
         assert_eq!(v["event"], "file");
         assert!(v["path"].is_string());
@@ -174,4 +178,29 @@ fn status_minimal_after_index() {
     let out = try_run(&["ferret", "status", "--json"]).unwrap();
     let v: serde_json::Value = serde_json::from_str(&out.stdout).unwrap();
     assert!(v.get("files").is_some());
+}
+
+#[test]
+#[serial_test::serial]
+fn index_json_emits_plan_event_first() {
+    let env = common::test_env();
+    std::fs::remove_file(env.root.join("pets.md")).unwrap();
+    std::fs::write(env.root.join("a.txt"), "alpha beta gamma").unwrap();
+    std::fs::write(env.root.join("b.txt"), "delta epsilon").unwrap();
+    let cfg = ferret::config::load(&ferret::config::LoadOpts::default()).unwrap();
+    let embedder = FakeEmbedder::new_with_profile(
+        cfg.embedder.prefix_profile,
+        cfg.embedder.dimensions,
+    );
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+    ferret::index::run(&cfg, &embedder, vec![], true, false, &mut out, &mut err).unwrap();
+    let stdout = String::from_utf8(out).unwrap();
+    let first: serde_json::Value =
+        serde_json::from_str(stdout.lines().next().unwrap()).unwrap();
+    assert_eq!(first["event"], "plan");
+    assert_eq!(first["files"], 2);
+    let expected_bytes = std::fs::metadata(env.root.join("a.txt")).unwrap().len()
+        + std::fs::metadata(env.root.join("b.txt")).unwrap().len();
+    assert_eq!(first["bytes"], expected_bytes);
 }

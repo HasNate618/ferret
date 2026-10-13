@@ -72,6 +72,29 @@ pub fn run(
     )?;
     summary.seen = events.len() as u64;
 
+    // NDJSON `plan` event (spec §10): progress totals before any per-file
+    // event. `files` counts File events only (walk-skips excluded); `bytes`
+    // sums each event's walk-time size (0 when it could not be statted).
+    if json_ndjson {
+        let mut plan_files = 0u64;
+        let mut plan_bytes = 0u64;
+        for event in &events {
+            if let WalkEvent::File { size, .. } = event {
+                plan_files += 1;
+                plan_bytes += size;
+            }
+        }
+        writeln!(
+            out,
+            "{}",
+            serde_json::json!({
+                "event": "plan",
+                "files": plan_files,
+                "bytes": plan_bytes,
+            })
+        )?;
+    }
+
     // PDFs defer to the two-pass scheduler below (spec §4.4): every PDF
     // first advances through `first_pass_pages`, then the remainder.
     // Their NDJSON events therefore come after text/image events.
@@ -83,6 +106,7 @@ pub fn run(
                 collection,
                 kind: FileKind::Pdf,
                 ext,
+                ..
             } => pdf_jobs.push(PdfJob {
                 path,
                 collection,
@@ -93,6 +117,7 @@ pub fn run(
                 collection,
                 kind,
                 ext,
+                ..
             } => index_file(
                 &store,
                 embedder,

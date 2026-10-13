@@ -607,13 +607,16 @@ Global flags: `--config FILE` (replaces the user `{config_dir}` layer), `--index
 
 No embedder call.
 
-`index` writes a summary to stderr: files seen / skipped / embedded / errors. `--json` on index emits NDJSON events to stdout:
+`index` writes a summary to stderr: files seen / skipped / embedded / errors. `--json` on index emits NDJSON events to stdout. The first line is always the plan event with progress totals; per-file events follow:
 
 ```json
+{"event":"plan","files":2,"bytes":29}
 {"event":"file","path":"/abs/path","status":"ok","reason":null,"error":null}
 {"event":"file","path":"/abs/path","status":"skip","reason":"no_image_backend","error":null}
 {"event":"file","path":"/abs/path","status":"error","reason":null,"error":"pdftotext not found"}
 ```
+
+`plan.files` counts walk File events only (walk-skips excluded); `plan.bytes` sums walked file sizes. Parsers MUST ignore unknown `event` values so future additive events never break them.
 
 Exit codes:
 

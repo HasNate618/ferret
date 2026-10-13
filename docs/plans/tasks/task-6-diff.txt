@@ -1,0 +1,547 @@
+ffc3cf2 feat: add embedder prefixes and fake unit-vector backend
+
+ src/config.rs          |   3 +-
+ src/embedder/fake.rs   |  67 +++++++++++++++++++++
+ src/embedder/mod.rs    | 104 ++++++++++++++++++++++++++++++++
+ src/embedder/prefix.rs | 149 ++++++++++++++++++++++++++++++++++++++++++++++
+ src/lib.rs             |   1 +
+ tests/embedder_fake.rs | 157 +++++++++++++++++++++++++++++++++++++++++++++++++
+ 6 files changed, 480 insertions(+), 1 deletion(-)
+
+diff --git a/src/config.rs b/src/config.rs
+index 4e54020..2c8be7c 100644
+--- a/src/config.rs
++++ b/src/config.rs
+@@ -1,16 +1,17 @@
+ //! Layered TOML config: compiled defaults → `/etc/ferret/config.toml` →
+ //! `{config_dir}/config.toml` (or `--config FILE`, which replaces that layer,
+ //! never stacks) → `./.ferret.toml` → `FERRET__SECTION__KEY` env → `--index`.
+ //!
+ //! All config errors are `Error::fatal` (exit 1). `FERRET_EMBEDDER` is a
+-//! special test hook handled elsewhere (Task 6), never here.
++//! special test hook read by `embedder::build_embedder` via its `env`
++//! parameter, never here.
+ 
+ use crate::error::{Error, Result};
+ use crate::paths::{ferret_dirs, FerretDirs, INDEX_FILENAME};
+ use crate::types::{Backend, FileKind, HeicMode, PrefixProfile, SearchMode, TextChunkMode};
+ use serde::Deserialize;
+ use std::collections::{BTreeMap, BTreeSet};
+ use std::path::{Path, PathBuf};
+ use toml::{Table, Value};
+ 
+ /// Input to config loading: the `--config` and `--index` CLI flags.
+diff --git a/src/embedder/fake.rs b/src/embedder/fake.rs
+new file mode 100644
+index 0000000..e91c64e
+--- /dev/null
++++ b/src/embedder/fake.rs
+@@ -0,0 +1,67 @@
++//! Deterministic fake embedder (`FERRET_EMBEDDER=fake`): blake3-derived unit
++//! vectors, independent of any server. Test hook only.
++
++use super::{l2_normalize, EmbedInput, Embedder};
++use crate::error::Result;
++use crate::types::PrefixProfile;
++
++pub struct FakeEmbedder {
++    profile: PrefixProfile,
++    dimensions: u32,
++}
++
++impl FakeEmbedder {
++    /// Test hook with the model-card profile default.
++    pub fn new(dimensions: u32) -> Self {
++        Self::new_with_profile(PrefixProfile::EmbeddingGemma2, dimensions)
++    }
++
++    /// Fake embedder carrying the merged-config profile so vectors follow
++    /// the active prefix strings.
++    pub fn new_with_profile(profile: PrefixProfile, dimensions: u32) -> Self {
++        Self { profile, dimensions }
++    }
++
++    /// `blake3(prefix || 0x1f || payload)`: the prefix is the profile's text
++    /// prompt (empty for image-only inputs), the payload is the UTF-8 text or
++    /// the raw image bytes. A PDF page hashes `image_png || 0x1f || text` so
++    /// it never collides with a plain `Image` of the same bytes.
++    fn hash_input(&self, input: &EmbedInput) -> Vec<u8> {
++        let mut buf = Vec::new();
++        if let Some(prefix) = super::apply_prefix(self.profile, input) {
++            buf.extend_from_slice(prefix.as_bytes());
++        }
++        buf.push(0x1f);
++        match input {
++            EmbedInput::Query { text, .. } | EmbedInput::Document { text, .. } => {
++                buf.extend_from_slice(text.as_bytes());
++            }
++            EmbedInput::Image { bytes, .. } => buf.extend_from_slice(bytes),
++            EmbedInput::PdfPage { image_png, text } => {
++                buf.extend_from_slice(image_png);
++                buf.push(0x1f);
++                if let Some(text) = text {
++                    buf.extend_from_slice(text.as_bytes());
++                }
++            }
++        }
++        buf
++    }
++}
++
++impl Embedder for FakeEmbedder {
++    fn embed(&self, input: EmbedInput) -> Result<Vec<f32>> {
++        let mut hasher = blake3::Hasher::new();
++        hasher.update(&self.hash_input(&input));
++        // First `dimensions` output bytes as `u8 as f32`, always finite; the
++        // extended output covers `dimensions` beyond blake3's 32-byte digest.
++        let mut bytes = vec![0u8; self.dimensions as usize];
++        hasher.finalize_xof().fill(&mut bytes);
++        let raw: Vec<f32> = bytes.iter().map(|&b| b as f32).collect();
++        l2_normalize(raw)
++    }
++
++    fn images_supported(&self) -> bool {
++        true
++    }
++}
+diff --git a/src/embedder/mod.rs b/src/embedder/mod.rs
+new file mode 100644
+index 0000000..d4df1e9
+--- /dev/null
++++ b/src/embedder/mod.rs
+@@ -0,0 +1,104 @@
++//! Embedder front end: typed inputs, the `Embedder` trait, L2
++//! normalization / dimension enforcement, and `build_embedder` with the
++//! `FERRET_EMBEDDER=fake` test hook. HTTP backends land with Task 12; until
++//! then only the fake embedder can be built.
++
++pub mod fake;
++pub mod prefix;
++
++pub use fake::FakeEmbedder;
++pub use prefix::apply_prefix;
++
++use crate::config::Config;
++use crate::error::{Error, Result};
++use crate::types::{Backend, QueryTask};
++
++/// One typed embedding input per modality (spec §3.1). Callers pass a typed
++/// input so prefixes and modalities stay consistent.
++#[derive(Debug, Clone)]
++pub enum EmbedInput {
++    /// Search/code query; `task` selects the query prefix.
++    Query { text: String, task: QueryTask },
++    /// Text document; `title` is the basename, `"none"` in the prefix when
++    /// unknown.
++    Document { title: Option<String>, text: String },
++    /// Image-only input; no text prefix.
++    Image { bytes: Vec<u8>, mime: String },
++    /// One PDF page: image part plus optional page text, one vector.
++    PdfPage { image_png: Vec<u8>, text: Option<String> },
++}
++
++/// An embedding backend. Every output is a single L2-normalized vector of
++/// `embedder.dimensions` finite `f32`s.
++pub trait Embedder: Send + Sync {
++    fn embed(&self, input: EmbedInput) -> Result<Vec<f32>>;
++    fn embed_batch(&self, inputs: &[EmbedInput]) -> Result<Vec<Vec<f32>>> {
++        inputs.iter().cloned().map(|i| self.embed(i)).collect()
++    }
++    fn images_supported(&self) -> bool;
++}
++
++/// Build the embedder for the merged config. `FERRET_EMBEDDER=fake` wins over
++/// `embedder.backend` (any backend) and the fake reports
++/// `images_supported = true`. Without the fake hook this is fatal until the
++/// HTTP backends land (Task 12).
++pub fn build_embedder(
++    cfg: &Config,
++    env: &dyn Fn(&str) -> Option<String>,
++) -> Result<Box<dyn Embedder>> {
++    if env("FERRET_EMBEDDER").as_deref() == Some("fake") {
++        return Ok(Box::new(FakeEmbedder::new_with_profile(
++            cfg.embedder.prefix_profile,
++            cfg.embedder.dimensions,
++        )));
++    }
++    Err(Error::fatal("http embedder not implemented"))
++}
++
++/// L2-normalize `v`. Any non-finite component, or a zero norm, is an error:
++/// ferret stores only finite `f32` and every stored vector is unit length.
++pub fn l2_normalize(v: Vec<f32>) -> Result<Vec<f32>> {
++    if v.iter().any(|x| !x.is_finite()) {
++        return Err(Error::fatal("vector contains non-finite values"));
++    }
++    let norm = v.iter().map(|x| x * x).sum::<f32>().sqrt();
++    if norm == 0.0 {
++        return Err(Error::fatal("cannot L2-normalize a zero vector"));
++    }
++    Ok(v.into_iter().map(|x| x / norm).collect())
++}
++
++/// Enforce the configured `dimensions` on a raw backend vector (spec §3.3).
++/// `openai`/`sglang` receive `dimensions` in the request body and must return
++/// exactly that length. `llama_server`/`litert_lm` do not send `dimensions`:
++/// a longer vector is truncated then L2-renormalized. A shorter vector, or
++/// any non-finite component, is an error.
++pub fn truncate_or_check(v: Vec<f32>, backend: Backend, dimensions: u32) -> Result<Vec<f32>> {
++    if v.iter().any(|x| !x.is_finite()) {
++        return Err(Error::fatal("embedder returned non-finite values"));
++    }
++    let n = dimensions as usize;
++    match backend {
++        Backend::Openai | Backend::Sglang => {
++            if v.len() != n {
++                return Err(Error::fatal(format!(
++                    "embedder returned {} dimensions, expected {dimensions}",
++                    v.len()
++                )));
++            }
++            Ok(v)
++        }
++        Backend::LlamaServer | Backend::LitertLm => {
++            if v.len() < n {
++                return Err(Error::fatal(format!(
++                    "embedder returned {} dimensions, expected at least {dimensions}",
++                    v.len()
++                )));
++            }
++            if v.len() > n {
++                return l2_normalize(v.into_iter().take(n).collect());
++            }
++            Ok(v)
++        }
++    }
++}
+diff --git a/src/embedder/prefix.rs b/src/embedder/prefix.rs
+new file mode 100644
+index 0000000..f44b904
+--- /dev/null
++++ b/src/embedder/prefix.rs
+@@ -0,0 +1,149 @@
++//! Prompt prefixes per profile (spec §3.2). The strings are the model-card /
++//! LiteRT-LM docs spellings verbatim; test vectors pin them, so do not
++//! "improve" them. Prefixes apply to text only: image-only inputs (and a
++//! PDF page with no text) get no text prefix.
++
++use super::EmbedInput;
++use crate::types::{PrefixProfile, QueryTask};
++
++/// Text prompt for `input` under `profile`, or `None` when there is no text
++/// part. A PDF page with text uses the profile's Document prefix (title
++/// `"none"`); a textless page has no text part.
++pub fn apply_prefix(profile: PrefixProfile, input: &EmbedInput) -> Option<String> {
++    match (profile, input) {
++        (
++            PrefixProfile::EmbeddingGemma2,
++            EmbedInput::Query { text, task: QueryTask::Search },
++        ) => Some(format!("task: search result | query: {text}")),
++        (
++            PrefixProfile::EmbeddingGemma2,
++            EmbedInput::Query { text, task: QueryTask::Code },
++        ) => Some(format!("task: code retrieval | query: {text}")),
++        (PrefixProfile::EmbeddingGemma2, EmbedInput::Document { title, text }) => Some(format!(
++            "title: {} | text: {text}",
++            title.as_deref().unwrap_or("none")
++        )),
++        (PrefixProfile::EmbeddingGemma2, EmbedInput::PdfPage { text: Some(text), .. }) => {
++            Some(format!("title: none | text: {text}"))
++        }
++        (
++            PrefixProfile::LitertLm,
++            EmbedInput::Query { text, task: QueryTask::Search },
++        ) => Some(format!("task: search query | text: {text}")),
++        (
++            PrefixProfile::LitertLm,
++            EmbedInput::Query { text, task: QueryTask::Code },
++        ) => Some(format!("task: code retrieval | query: {text}")),
++        (PrefixProfile::LitertLm, EmbedInput::Document { text, .. }) => {
++            Some(format!("task: search result | text: {text}"))
++        }
++        (PrefixProfile::LitertLm, EmbedInput::PdfPage { text: Some(text), .. }) => {
++            Some(format!("task: search result | text: {text}"))
++        }
++        // Image-only inputs, and a PDF page with no text, have no text part.
++        _ => None,
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::super::{Embedder, FakeEmbedder};
++    use super::{apply_prefix, EmbedInput};
++    use crate::types::{PrefixProfile, QueryTask};
++
++    #[test]
++    fn gemma2_search_query_prefix() {
++        let s = apply_prefix(
++            PrefixProfile::EmbeddingGemma2,
++            &EmbedInput::Query { text: "pets".into(), task: QueryTask::Search },
++        );
++        assert_eq!(s.as_deref(), Some("task: search result | query: pets"));
++    }
++
++    #[test]
++    fn litert_search_query_prefix() {
++        let s = apply_prefix(
++            PrefixProfile::LitertLm,
++            &EmbedInput::Query { text: "pets".into(), task: QueryTask::Search },
++        );
++        assert_eq!(s.as_deref(), Some("task: search query | text: pets"));
++    }
++
++    #[test]
++    fn image_only_has_no_text_prefix() {
++        let s = apply_prefix(
++            PrefixProfile::EmbeddingGemma2,
++            &EmbedInput::Image { bytes: vec![1], mime: "image/png".into() },
++        );
++        assert!(s.is_none());
++    }
++
++    #[test]
++    fn fake_is_unit_length_and_deterministic() {
++        let e = FakeEmbedder::new(8);
++        let a = e.embed(EmbedInput::Document { title: Some("a.txt".into()), text: "hi".into() }).unwrap();
++        let b = e.embed(EmbedInput::Document { title: Some("a.txt".into()), text: "hi".into() }).unwrap();
++        assert_eq!(a, b);
++        let n = a.iter().map(|x| x * x).sum::<f32>().sqrt();
++        assert!((n - 1.0).abs() < 1e-5);
++    }
++
++    #[test]
++    fn gemma2_code_query_prefix() {
++        let s = apply_prefix(
++            PrefixProfile::EmbeddingGemma2,
++            &EmbedInput::Query { text: "parse".into(), task: QueryTask::Code },
++        );
++        assert_eq!(s.as_deref(), Some("task: code retrieval | query: parse"));
++    }
++
++    #[test]
++    fn litert_code_query_prefix() {
++        let s = apply_prefix(
++            PrefixProfile::LitertLm,
++            &EmbedInput::Query { text: "parse".into(), task: QueryTask::Code },
++        );
++        assert_eq!(s.as_deref(), Some("task: code retrieval | query: parse"));
++    }
++
++    #[test]
++    fn gemma2_document_prefix_uses_none_for_missing_title() {
++        let s = apply_prefix(
++            PrefixProfile::EmbeddingGemma2,
++            &EmbedInput::Document { title: None, text: "pets".into() },
++        );
++        assert_eq!(s.as_deref(), Some("title: none | text: pets"));
++    }
++
++    #[test]
++    fn litert_document_prefix() {
++        let s = apply_prefix(
++            PrefixProfile::LitertLm,
++            &EmbedInput::Document { title: Some("a.txt".into()), text: "pets".into() },
++        );
++        assert_eq!(s.as_deref(), Some("task: search result | text: pets"));
++    }
++
++    #[test]
++    fn pdf_page_with_text_uses_document_prefix() {
++        let s = apply_prefix(
++            PrefixProfile::EmbeddingGemma2,
++            &EmbedInput::PdfPage { image_png: vec![1], text: Some("pets".into()) },
++        );
++        assert_eq!(s.as_deref(), Some("title: none | text: pets"));
++        let s = apply_prefix(
++            PrefixProfile::LitertLm,
++            &EmbedInput::PdfPage { image_png: vec![1], text: Some("pets".into()) },
++        );
++        assert_eq!(s.as_deref(), Some("task: search result | text: pets"));
++    }
++
++    #[test]
++    fn textless_pdf_page_has_no_text_prefix() {
++        let s = apply_prefix(
++            PrefixProfile::EmbeddingGemma2,
++            &EmbedInput::PdfPage { image_png: vec![1], text: None },
++        );
++        assert!(s.is_none());
++    }
++}
+diff --git a/src/lib.rs b/src/lib.rs
+index af46e81..ee60283 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -1,7 +1,8 @@
+ pub mod cli;
+ pub mod config;
++pub mod embedder;
+ pub mod error;
+ pub mod fingerprint;
+ pub mod paths;
+ pub mod store;
+ pub mod types;
+diff --git a/tests/embedder_fake.rs b/tests/embedder_fake.rs
+new file mode 100644
+index 0000000..5ae9fd3
+--- /dev/null
++++ b/tests/embedder_fake.rs
+@@ -0,0 +1,157 @@
++//! Fake embedder: determinism, unit length, per-kind distinctness, and the
++//! `FERRET_EMBEDDER=fake` hook in `build_embedder`.
++
++mod common;
++
++use common::test_dirs;
++use ferret::config::compiled_defaults;
++use ferret::embedder::{
++    build_embedder, l2_normalize, truncate_or_check, EmbedInput, Embedder, FakeEmbedder,
++};
++use ferret::types::{Backend, PrefixProfile, QueryTask};
++
++fn no_env(_: &str) -> Option<String> {
++    None
++}
++
++fn fake_env(key: &str) -> Option<String> {
++    (key == "FERRET_EMBEDDER").then(|| "fake".to_string())
++}
++
++fn unit_norm(v: &[f32]) -> f32 {
++    v.iter().map(|x| x * x).sum::<f32>().sqrt()
++}
++
++#[test]
++fn build_embedder_fake_env_wins_over_any_backend() {
++    let tmp = tempfile::tempdir().unwrap();
++    let cfg = compiled_defaults(&test_dirs(tmp.path()));
++    let e = build_embedder(&cfg, &fake_env).unwrap();
++    assert!(e.images_supported());
++    let v = e
++        .embed(EmbedInput::Query { text: "pets".into(), task: QueryTask::Search })
++        .unwrap();
++    assert_eq!(v.len(), cfg.embedder.dimensions as usize);
++    assert!(v.iter().all(|x| x.is_finite()));
++    assert!((unit_norm(&v) - 1.0).abs() < 1e-5);
++}
++
++#[test]
++fn build_embedder_without_fake_is_fatal_until_task_12() {
++    let tmp = tempfile::tempdir().unwrap();
++    let cfg = compiled_defaults(&test_dirs(tmp.path()));
++    let err = match build_embedder(&cfg, &no_env) {
++        Err(err) => err,
++        Ok(_) => panic!("expected fatal error without the fake hook"),
++    };
++    assert_eq!(err.to_string(), "http embedder not implemented");
++}
++
++#[test]
++fn fake_vectors_differ_per_input_kind() {
++    let e = FakeEmbedder::new(8);
++    let query = e
++        .embed(EmbedInput::Query { text: "hi".into(), task: QueryTask::Search })
++        .unwrap();
++    let doc = e
++        .embed(EmbedInput::Document { title: None, text: "hi".into() })
++        .unwrap();
++    let image = e.embed(EmbedInput::Image { bytes: b"hi".to_vec(), mime: "image/png".into() }).unwrap();
++    let page_textless =
++        e.embed(EmbedInput::PdfPage { image_png: b"hi".to_vec(), text: None }).unwrap();
++    let page_with_text =
++        e.embed(EmbedInput::PdfPage { image_png: b"hi".to_vec(), text: Some("hi".into()) }).unwrap();
++    // Same payload bytes, different kinds: all five vectors are distinct.
++    for (name, v) in [
++        ("query", &query),
++        ("document", &doc),
++        ("image", &image),
++        ("page_textless", &page_textless),
++        ("page_with_text", &page_with_text),
++    ] {
++        for (other_name, other) in [
++            ("query", &query),
++            ("document", &doc),
++            ("image", &image),
++            ("page_textless", &page_textless),
++            ("page_with_text", &page_with_text),
++        ] {
++            if name != other_name {
++                assert_ne!(v, other, "{name} vs {other_name} must differ");
++            }
++        }
++    }
++}
++
++#[test]
++fn fake_query_task_changes_vector() {
++    let e = FakeEmbedder::new(8);
++    let search = e
++        .embed(EmbedInput::Query { text: "parse".into(), task: QueryTask::Search })
++        .unwrap();
++    let code = e
++        .embed(EmbedInput::Query { text: "parse".into(), task: QueryTask::Code })
++        .unwrap();
++    assert_ne!(search, code);
++}
++
++#[test]
++fn fake_respects_profile_and_dimensions() {
++    let gemma2 = FakeEmbedder::new_with_profile(PrefixProfile::EmbeddingGemma2, 128);
++    let litert = FakeEmbedder::new_with_profile(PrefixProfile::LitertLm, 128);
++    let input = EmbedInput::Query { text: "pets".into(), task: QueryTask::Search };
++    let a = gemma2.embed(input.clone()).unwrap();
++    let b = litert.embed(input).unwrap();
++    assert_eq!(a.len(), 128);
++    assert_ne!(a, b, "profiles must produce distinct vectors");
++}
++
++#[test]
++fn fake_embed_batch_matches_embed() {
++    let e = FakeEmbedder::new(8);
++    let inputs = vec![
++        EmbedInput::Document { title: Some("a.txt".into()), text: "hi".into() },
++        EmbedInput::Query { text: "pets".into(), task: QueryTask::Search },
++    ];
++    let batch = e.embed_batch(&inputs).unwrap();
++    assert_eq!(batch[0], e.embed(inputs[0].clone()).unwrap());
++    assert_eq!(batch[1], e.embed(inputs[1].clone()).unwrap());
++}
++
++#[test]
++fn l2_normalize_rejects_nonfinite_and_zero() {
++    assert!(l2_normalize(vec![f32::NAN, 1.0]).is_err());
++    assert!(l2_normalize(vec![f32::INFINITY, 1.0]).is_err());
++    assert!(l2_normalize(vec![0.0, 0.0]).is_err());
++    let v = l2_normalize(vec![3.0, 4.0]).unwrap();
++    assert_eq!(v, vec![0.6, 0.8]);
++}
++
++#[test]
++fn truncate_or_check_openai_requires_exact_dimensions() {
++    let v: Vec<f32> = (0..4).map(|i| i as f32 + 1.0).collect();
++    let out = truncate_or_check(v.clone(), Backend::Openai, 4).unwrap();
++    assert_eq!(out, v);
++    assert!(truncate_or_check(v.clone(), Backend::Openai, 3).is_err());
++    assert!(truncate_or_check(v.clone(), Backend::Sglang, 5).is_err());
++    assert!(truncate_or_check(vec![f32::NAN, 1.0, 2.0, 3.0], Backend::Openai, 4).is_err());
++}
++
++#[test]
++fn truncate_or_check_llama_truncates_and_renorms() {
++    // 3-4-5 right triangle over 6 values: truncating to 3 must renormalize
++    // the prefix back to unit length.
++    let v = vec![3.0, 4.0, 0.0, 5.0, 12.0, 13.0];
++    let out = truncate_or_check(v, Backend::LlamaServer, 3).unwrap();
++    assert_eq!(out, vec![0.6, 0.8, 0.0]);
++    assert!((unit_norm(&out) - 1.0).abs() < 1e-6);
++    // Exact length passes through unchanged.
++    let exact = vec![0.6, 0.8, 0.0];
++    assert_eq!(
++        truncate_or_check(exact.clone(), Backend::LitertLm, 3).unwrap(),
++        exact
++    );
++    // Shorter is an error.
++    assert!(truncate_or_check(vec![1.0, 2.0], Backend::LlamaServer, 3).is_err());
++    assert!(truncate_or_check(vec![1.0, f32::NAN], Backend::LitertLm, 3).is_err());
++}

@@ -10,7 +10,7 @@
 pub const SYSTEM_CONFIG_PATH: &str = "/etc/ferret/config.toml";
 
 use crate::error::{Error, Result};
-use crate::paths::{ferret_dirs, FerretDirs, INDEX_FILENAME};
+use crate::paths::{FerretDirs, INDEX_FILENAME, ferret_dirs};
 use crate::types::{Backend, FileKind, HeicMode, PrefixProfile, SearchMode, TextChunkMode};
 use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet};
@@ -143,15 +143,9 @@ pub struct FilesConfig {
 pub fn load(opts: &LoadOpts) -> Result<Config> {
     let dirs = ferret_dirs(&|k| std::env::var(k).ok());
     let cwd = std::env::current_dir()?;
-    let (cfg, _) = load_from(
-        opts,
-        &dirs,
-        &|k| std::env::var(k).ok(),
-        &cwd,
-        &|p| {
-            std::fs::read_to_string(p).map_err(|e| Error::fatal(e.to_string()))
-        },
-    )?;
+    let (cfg, _) = load_from(opts, &dirs, &|k| std::env::var(k).ok(), &cwd, &|p| {
+        std::fs::read_to_string(p).map_err(|e| Error::fatal(e.to_string()))
+    })?;
     Ok(cfg)
 }
 
@@ -307,7 +301,11 @@ fn default_extension_kind() -> BTreeMap<String, FileKind> {
             "nix", "lua", "css", "svg",
         ],
     );
-    put(&mut map, FileKind::Image, &["jpg", "jpeg", "png", "webp", "gif", "bmp"]);
+    put(
+        &mut map,
+        FileKind::Image,
+        &["jpg", "jpeg", "png", "webp", "gif", "bmp"],
+    );
     put(&mut map, FileKind::Pdf, &["pdf"]);
     map
 }
@@ -318,14 +316,20 @@ pub fn to_display_toml(cfg: &Config) -> String {
     let mut root = Table::new();
 
     let mut index = Table::new();
-    index.insert("path".into(), Value::from(cfg.index.path.to_string_lossy().into_owned()));
+    index.insert(
+        "path".into(),
+        Value::from(cfg.index.path.to_string_lossy().into_owned()),
+    );
     let roots: Vec<Value> = cfg
         .index
         .roots
         .iter()
         .map(|r| {
             let mut t = Table::new();
-            t.insert("path".into(), Value::from(r.path.to_string_lossy().into_owned()));
+            t.insert(
+                "path".into(),
+                Value::from(r.path.to_string_lossy().into_owned()),
+            );
             t.insert("collection".into(), Value::from(r.collection.clone()));
             Value::Table(t)
         })
@@ -334,8 +338,14 @@ pub fn to_display_toml(cfg: &Config) -> String {
     root.insert("index".into(), Value::Table(index));
 
     let mut embedder = Table::new();
-    embedder.insert("backend".into(), Value::from(cfg.embedder.backend.to_string()));
-    embedder.insert("endpoint".into(), Value::from(cfg.embedder.endpoint.clone()));
+    embedder.insert(
+        "backend".into(),
+        Value::from(cfg.embedder.backend.to_string()),
+    );
+    embedder.insert(
+        "endpoint".into(),
+        Value::from(cfg.embedder.endpoint.clone()),
+    );
     embedder.insert("model".into(), Value::from(cfg.embedder.model.clone()));
     embedder.insert(
         "prefix_profile".into(),
@@ -343,20 +353,33 @@ pub fn to_display_toml(cfg: &Config) -> String {
     );
     embedder.insert("dimensions".into(), Value::from(cfg.embedder.dimensions));
     embedder.insert("batch_size".into(), Value::from(cfg.embedder.batch_size));
-    embedder.insert("timeout_ms".into(), Value::from(cfg.embedder.timeout_ms as i64));
+    embedder.insert(
+        "timeout_ms".into(),
+        Value::from(cfg.embedder.timeout_ms as i64),
+    );
     if let Some(multimodal) = cfg.embedder.multimodal {
         embedder.insert("multimodal".into(), Value::from(multimodal));
     }
     embedder.insert("managed".into(), Value::from(cfg.embedder.managed));
     embedder.insert(
         "managed_command".into(),
-        Value::Array(cfg.embedder.managed_command.iter().map(|s| Value::from(s.clone())).collect()),
+        Value::Array(
+            cfg.embedder
+                .managed_command
+                .iter()
+                .map(|s| Value::from(s.clone()))
+                .collect(),
+        ),
     );
     embedder.insert("gguf".into(), Value::from(cfg.embedder.gguf.clone()));
     embedder.insert("mmproj".into(), Value::from(cfg.embedder.mmproj.clone()));
     embedder.insert(
         "api_key".into(),
-        Value::from(if cfg.embedder.api_key.is_empty() { "" } else { "***" }),
+        Value::from(if cfg.embedder.api_key.is_empty() {
+            ""
+        } else {
+            "***"
+        }),
     );
     root.insert("embedder".into(), Value::Table(embedder));
 
@@ -365,26 +388,53 @@ pub fn to_display_toml(cfg: &Config) -> String {
     search.insert("rrf_k".into(), Value::from(cfg.search.rrf_k));
     search.insert("weight_vec".into(), Value::from(cfg.search.weight_vec));
     search.insert("weight_fts".into(), Value::from(cfg.search.weight_fts));
-    search.insert("weight_filename".into(), Value::from(cfg.search.weight_filename));
-    search.insert("default_limit".into(), Value::from(cfg.search.default_limit as i64));
-    search.insert("candidates".into(), Value::from(cfg.search.candidates as i64));
+    search.insert(
+        "weight_filename".into(),
+        Value::from(cfg.search.weight_filename),
+    );
+    search.insert(
+        "default_limit".into(),
+        Value::from(cfg.search.default_limit as i64),
+    );
+    search.insert(
+        "candidates".into(),
+        Value::from(cfg.search.candidates as i64),
+    );
     search.insert("min_score".into(), Value::from(cfg.search.min_score));
     root.insert("search".into(), Value::Table(search));
 
     let mut text = Table::new();
     text.insert("mode".into(), Value::from(cfg.chunk.text.mode.to_string()));
-    text.insert("max_chars".into(), Value::from(cfg.chunk.text.max_chars as i64));
+    text.insert(
+        "max_chars".into(),
+        Value::from(cfg.chunk.text.max_chars as i64),
+    );
     text.insert("overlap".into(), Value::from(cfg.chunk.text.overlap as i64));
-    text.insert("skip_letterless".into(), Value::from(cfg.chunk.text.skip_letterless));
-    text.insert("numeric_heavy".into(), Value::from(cfg.chunk.text.numeric_heavy));
+    text.insert(
+        "skip_letterless".into(),
+        Value::from(cfg.chunk.text.skip_letterless),
+    );
+    text.insert(
+        "numeric_heavy".into(),
+        Value::from(cfg.chunk.text.numeric_heavy),
+    );
     let mut pdf = Table::new();
     pdf.insert("max_pages".into(), Value::from(cfg.chunk.pdf.max_pages));
-    pdf.insert("first_pass_pages".into(), Value::from(cfg.chunk.pdf.first_pass_pages));
+    pdf.insert(
+        "first_pass_pages".into(),
+        Value::from(cfg.chunk.pdf.first_pass_pages),
+    );
     pdf.insert("render_dpi".into(), Value::from(cfg.chunk.pdf.render_dpi));
     pdf.insert("embed_text".into(), Value::from(cfg.chunk.pdf.embed_text));
-    pdf.insert("embed_page_image".into(), Value::from(cfg.chunk.pdf.embed_page_image));
+    pdf.insert(
+        "embed_page_image".into(),
+        Value::from(cfg.chunk.pdf.embed_page_image),
+    );
     let mut image = Table::new();
-    image.insert("max_edge_px".into(), Value::from(cfg.chunk.image.max_edge_px));
+    image.insert(
+        "max_edge_px".into(),
+        Value::from(cfg.chunk.image.max_edge_px),
+    );
     let mut chunk = Table::new();
     chunk.insert("text".into(), Value::Table(text));
     chunk.insert("pdf".into(), Value::Table(pdf));
@@ -392,25 +442,52 @@ pub fn to_display_toml(cfg: &Config) -> String {
     root.insert("chunk".into(), Value::Table(chunk));
 
     let mut extract = Table::new();
-    extract.insert("poppler_dir".into(), Value::from(cfg.extract.poppler_dir.clone()));
+    extract.insert(
+        "poppler_dir".into(),
+        Value::from(cfg.extract.poppler_dir.clone()),
+    );
     extract.insert("pdfinfo".into(), Value::from(cfg.extract.pdfinfo.clone()));
-    extract.insert("pdftotext".into(), Value::from(cfg.extract.pdftotext.clone()));
+    extract.insert(
+        "pdftotext".into(),
+        Value::from(cfg.extract.pdftotext.clone()),
+    );
     extract.insert("pdftoppm".into(), Value::from(cfg.extract.pdftoppm.clone()));
     root.insert("extract".into(), Value::Table(extract));
 
     let mut files = Table::new();
-    files.insert("follow_symlinks".into(), Value::from(cfg.files.follow_symlinks));
-    files.insert("include_hidden".into(), Value::from(cfg.files.include_hidden));
-    files.insert("respect_gitignore".into(), Value::from(cfg.files.respect_gitignore));
+    files.insert(
+        "follow_symlinks".into(),
+        Value::from(cfg.files.follow_symlinks),
+    );
+    files.insert(
+        "include_hidden".into(),
+        Value::from(cfg.files.include_hidden),
+    );
+    files.insert(
+        "respect_gitignore".into(),
+        Value::from(cfg.files.respect_gitignore),
+    );
     files.insert("heic".into(), Value::from(cfg.files.heic.to_string()));
     files.insert("max_size".into(), Value::from(cfg.files.max_size as i64));
     files.insert(
         "include_globs".into(),
-        Value::Array(cfg.files.include_globs.iter().map(|s| Value::from(s.clone())).collect()),
+        Value::Array(
+            cfg.files
+                .include_globs
+                .iter()
+                .map(|s| Value::from(s.clone()))
+                .collect(),
+        ),
     );
     files.insert(
         "exclude_globs".into(),
-        Value::Array(cfg.files.exclude_globs.iter().map(|s| Value::from(s.clone())).collect()),
+        Value::Array(
+            cfg.files
+                .exclude_globs
+                .iter()
+                .map(|s| Value::from(s.clone()))
+                .collect(),
+        ),
     );
     files.insert(
         "extension_kind".into(),
@@ -433,7 +510,11 @@ pub fn to_display_toml(cfg: &Config) -> String {
 
 /// Read and parse one file layer. `read` returning `Err` means the layer is
 /// absent (skip), except when `explicit` is set (`--config FILE` → fatal).
-fn read_layer(path: &Path, read: &dyn Fn(&Path) -> Result<String>, explicit: bool) -> Result<Option<Table>> {
+fn read_layer(
+    path: &Path,
+    read: &dyn Fn(&Path) -> Result<String>,
+    explicit: bool,
+) -> Result<Option<Table>> {
     let text = match read(path) {
         Ok(text) => text,
         Err(e) => {
@@ -488,7 +569,9 @@ fn check_api_key_mode(path: &Path, table: &Table) -> Result<()> {
 fn deep_merge(dst: &mut Table, src: Table) {
     for (key, value) in src {
         match (dst.get_mut(&key), value) {
-            (Some(Value::Table(existing)), Value::Table(incoming)) => deep_merge(existing, incoming),
+            (Some(Value::Table(existing)), Value::Table(incoming)) => {
+                deep_merge(existing, incoming)
+            }
             (_, value) => {
                 dst.insert(key, value);
             }
@@ -788,8 +871,8 @@ fn parse_size(spec: SizeSpec) -> Result<u64> {
 }
 
 fn table_into_raw(merged: Table) -> Result<RawConfig> {
-    let text = toml::to_string(&Value::Table(merged))
-        .map_err(|e| Error::fatal(format!("config: {e}")))?;
+    let text =
+        toml::to_string(&Value::Table(merged)).map_err(|e| Error::fatal(format!("config: {e}")))?;
     toml::from_str::<RawConfig>(&text).map_err(|e| Error::fatal(format!("config: {e}")))
 }
 

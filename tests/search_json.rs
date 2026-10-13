@@ -2,9 +2,9 @@
 
 mod common;
 
-use ferret::config::{compiled_defaults, Config};
+use ferret::config::{Config, compiled_defaults};
 use ferret::embedder::{EmbedInput, Embedder, FakeEmbedder};
-use ferret::search::{parse_query, render_json, run_search, FilterFlags, SearchRequest};
+use ferret::search::{FilterFlags, SearchRequest, parse_query, render_json, run_search};
 use ferret::store::{self, NewChunk, NewFile, Store};
 use ferret::types::{ChunkKind, FileKind, PrefixProfile, SearchMode};
 use std::cell::RefCell;
@@ -67,7 +67,15 @@ fn fixture() -> (Store, Config, FakeEmbedder) {
         )
         .unwrap();
     store
-        .insert_vec(&tx, chunk_id, &embedding, FileKind::Text, "md", MTIME, "Documents")
+        .insert_vec(
+            &tx,
+            chunk_id,
+            &embedding,
+            FileKind::Text,
+            "md",
+            MTIME,
+            "Documents",
+        )
         .unwrap();
     // The chunks_fts row is written by the `chunks_fts_ai` trigger (the
     // production path); a manual insert would now collide on rowid.
@@ -95,11 +103,27 @@ fn run_search_json_on_fixture(query: &str) -> String {
 fn json_object_keys_and_null_page() {
     let out = run_search_json_on_fixture("pets");
     let v: serde_json::Value = serde_json::from_str(&out).unwrap();
-    for k in ["query", "task", "mode", "limit", "min_score", "filters", "hits"] {
+    for k in [
+        "query",
+        "task",
+        "mode",
+        "limit",
+        "min_score",
+        "filters",
+        "hits",
+    ] {
         assert!(v.get(k).is_some(), "{k}");
     }
     let f = &v["filters"];
-    for k in ["kind", "ext", "under", "collection", "name", "after", "before"] {
+    for k in [
+        "kind",
+        "ext",
+        "under",
+        "collection",
+        "name",
+        "after",
+        "before",
+    ] {
         assert!(f.get(k).is_some(), "{k}");
     }
     let h = &v["hits"][0];

@@ -1,9 +1,7 @@
 //! Task 10: corpus walk, skip rules, gitignore, include globs.
 
-use ferret::config::{compiled_defaults, FilesConfig};
-use ferret::index::walk::{
-    kind_for_ext, walk, SkipReason, WalkEvent,
-};
+use ferret::config::{FilesConfig, compiled_defaults};
+use ferret::index::walk::{SkipReason, WalkEvent, kind_for_ext, walk};
 use ferret::types::FileKind;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -50,7 +48,13 @@ fn fixture_tree() -> (tempfile::TempDir, PathBuf) {
 fn pem_is_skip_rule() {
     let (_tmp, root) = fixture_tree();
     let ev = walk_one(&root);
-    assert!(ev.iter().any(|e| matches!(e, WalkEvent::Skip { reason: SkipReason::SkipRule, .. })));
+    assert!(ev.iter().any(|e| matches!(
+        e,
+        WalkEvent::Skip {
+            reason: SkipReason::SkipRule,
+            ..
+        }
+    )));
 }
 
 #[test]
@@ -60,14 +64,20 @@ fn hidden_skipped_unless_include_hidden() {
     // The `.hidden` directory is pruned (its contents are never visited),
     // which is the SkipRule event for this fixture.
     assert!(ev.iter().any(|e| match e {
-        WalkEvent::Skip { path, reason: SkipReason::SkipRule } => path.ends_with(".hidden"),
+        WalkEvent::Skip {
+            path,
+            reason: SkipReason::SkipRule,
+        } => path.ends_with(".hidden"),
         _ => false,
     }));
     // With include_hidden the hidden file is walked instead.
     let mut cfg = files_cfg();
     cfg.include_hidden = true;
     let ev = walk(&[root_entry(&root)], &[], &cfg, false).unwrap();
-    assert!(ev.iter().any(|e| matches!(e, WalkEvent::File { path, .. } if path.ends_with("a.txt"))));
+    assert!(
+        ev.iter()
+            .any(|e| matches!(e, WalkEvent::File { path, .. } if path.ends_with("a.txt")))
+    );
 }
 
 #[test]
@@ -76,8 +86,17 @@ fn include_globs_skips_non_matching() {
     let mut cfg = files_cfg();
     cfg.include_globs = vec!["*.md".into()];
     let ev = walk(&[root_entry(&root)], &[], &cfg, false).unwrap();
-    assert!(ev.iter().any(|e| matches!(e, WalkEvent::Skip { reason: SkipReason::IncludeGlobs, .. })));
-    assert!(ev.iter().any(|e| matches!(e, WalkEvent::File { kind: FileKind::Text, ext, .. } if ext == "md")));
+    assert!(ev.iter().any(|e| matches!(
+        e,
+        WalkEvent::Skip {
+            reason: SkipReason::IncludeGlobs,
+            ..
+        }
+    )));
+    assert!(
+        ev.iter()
+            .any(|e| matches!(e, WalkEvent::File { kind: FileKind::Text, ext, .. } if ext == "md"))
+    );
 }
 
 #[test]
@@ -89,10 +108,17 @@ fn gitignore_skip() {
     std::fs::write(root.join("skipme.txt"), "x").unwrap();
     std::fs::write(root.join("keep.md"), "y").unwrap();
     let ev = walk(&[root_entry(&root)], &[], &files_cfg(), false).unwrap();
-    assert!(ev.iter().any(|e| matches!(e, WalkEvent::Skip { reason: SkipReason::Gitignore, .. })));
-    assert!(ev
-        .iter()
-        .any(|e| matches!(e, WalkEvent::File { path, .. } if path.ends_with("keep.md"))));
+    assert!(ev.iter().any(|e| matches!(
+        e,
+        WalkEvent::Skip {
+            reason: SkipReason::Gitignore,
+            ..
+        }
+    )));
+    assert!(
+        ev.iter()
+            .any(|e| matches!(e, WalkEvent::File { path, .. } if path.ends_with("keep.md")))
+    );
 }
 
 #[test]
@@ -108,9 +134,9 @@ fn extra_path_under_root_inherits_collection() {
     let file = ev
         .iter()
         .find_map(|e| match e {
-            WalkEvent::File { path, collection, .. } if path.ends_with("ok.md") => {
-                Some(collection.clone())
-            }
+            WalkEvent::File {
+                path, collection, ..
+            } if path.ends_with("ok.md") => Some(collection.clone()),
             _ => None,
         })
         .expect("ok.md walked");
@@ -149,7 +175,10 @@ fn unsupported_ext_is_walk_skip() {
         e,
         WalkEvent::Skip { path, reason: SkipReason::UnsupportedExt } if path.ends_with("clip.mp4")
     )));
-    assert!(ev.iter().any(|e| matches!(e, WalkEvent::File { ext, .. } if ext == "rs")));
+    assert!(
+        ev.iter()
+            .any(|e| matches!(e, WalkEvent::File { ext, .. } if ext == "rs"))
+    );
 }
 
 #[test]
@@ -182,7 +211,10 @@ fn gitignored_directory_pruned() {
         e,
         WalkEvent::Skip { path, reason: SkipReason::Gitignore } if path.ends_with("build")
     )));
-    assert!(!ev.iter().any(|e| matches!(e, WalkEvent::File { path, .. } if path.ends_with("out.bin"))));
+    assert!(
+        !ev.iter()
+            .any(|e| matches!(e, WalkEvent::File { path, .. } if path.ends_with("out.bin")))
+    );
 }
 
 #[test]
@@ -215,8 +247,17 @@ fn no_git_dir_means_no_gitignore_skips() {
     std::fs::write(root.join(".gitignore"), "keep.md\n").unwrap();
     std::fs::write(root.join("keep.md"), "y").unwrap();
     let ev = walk(&[root_entry(&root)], &[], &files_cfg(), false).unwrap();
-    assert!(ev.iter().any(|e| matches!(e, WalkEvent::File { path, .. } if path.ends_with("keep.md"))));
-    assert!(!ev.iter().any(|e| matches!(e, WalkEvent::Skip { reason: SkipReason::Gitignore, .. })));
+    assert!(
+        ev.iter()
+            .any(|e| matches!(e, WalkEvent::File { path, .. } if path.ends_with("keep.md")))
+    );
+    assert!(!ev.iter().any(|e| matches!(
+        e,
+        WalkEvent::Skip {
+            reason: SkipReason::Gitignore,
+            ..
+        }
+    )));
 }
 
 #[test]
@@ -228,7 +269,8 @@ fn explicit_heic_mapping_wins_over_magick_default() {
     std::fs::write(root.join("pic.heic"), "x").unwrap();
     let mut cfg = files_cfg();
     cfg.heic = HeicMode::Magick;
-    cfg.extension_kind.insert("heic".to_string(), FileKind::Text);
+    cfg.extension_kind
+        .insert("heic".to_string(), FileKind::Text);
     let ev = walk(&[root_entry(&root)], &[], &cfg, false).unwrap();
     assert!(ev.iter().any(|e| matches!(
         e,
@@ -279,7 +321,9 @@ fn host_has_magick() -> bool {
         std::env::split_paths(&paths)
             .filter(|dir| !dir.as_os_str().is_empty())
             .any(|dir| {
-                ["magick", "convert"].iter().any(|bin| is_exec(&dir.join(bin)))
+                ["magick", "convert"]
+                    .iter()
+                    .any(|bin| is_exec(&dir.join(bin)))
             })
     })
 }

@@ -1,4 +1,4 @@
-use ferret::config::{compiled_defaults, load_from, LoadOpts};
+use ferret::config::{LoadOpts, compiled_defaults, load_from};
 use ferret::paths::FerretDirs;
 use ferret::types::PrefixProfile;
 use std::collections::HashMap;
@@ -17,7 +17,10 @@ fn compiled_index_path_uses_data_dir() {
     let c = compiled_defaults(&dirs());
     assert_eq!(c.index.path, PathBuf::from("/tmp/ferret-data/index.sqlite"));
     assert!(c.index.roots.is_empty());
-    assert!(matches!(c.embedder.prefix_profile, PrefixProfile::EmbeddingGemma2));
+    assert!(matches!(
+        c.embedder.prefix_profile,
+        PrefixProfile::EmbeddingGemma2
+    ));
 }
 
 #[test]
@@ -27,11 +30,19 @@ fn litert_backend_defaults_prefix_profile() {
         "[embedder]\nbackend = \"litert_lm\"\n".into(),
     )]);
     let (c, _) = load_from(
-        &LoadOpts { config_flag: None, index_flag: None },
+        &LoadOpts {
+            config_flag: None,
+            index_flag: None,
+        },
         &dirs(),
         &|_| None,
         Path::new("/tmp/cwd"),
-        &|p| files.get(p).cloned().ok_or_else(|| ferret::error::Error::fatal("missing")),
+        &|p| {
+            files
+                .get(p)
+                .cloned()
+                .ok_or_else(|| ferret::error::Error::fatal("missing"))
+        },
     )
     .unwrap();
     assert!(matches!(c.embedder.prefix_profile, PrefixProfile::LitertLm));
@@ -40,12 +51,12 @@ fn litert_backend_defaults_prefix_profile() {
 #[test]
 fn env_overrides_endpoint() {
     let (c, _) = load_from(
-        &LoadOpts { config_flag: None, index_flag: None },
-        &dirs(),
-        &|k| {
-            (k == "FERRET__EMBEDDER__ENDPOINT")
-                .then(|| "http://127.0.0.1:9999".into())
+        &LoadOpts {
+            config_flag: None,
+            index_flag: None,
         },
+        &dirs(),
+        &|k| (k == "FERRET__EMBEDDER__ENDPOINT").then(|| "http://127.0.0.1:9999".into()),
         Path::new("/tmp/cwd"),
         &|_| Err(ferret::error::Error::fatal("no files")),
     )
@@ -60,11 +71,19 @@ fn overlap_ge_max_chars_is_fatal() {
         "[chunk.text]\nmax_chars = 100\noverlap = 100\n".into(),
     )]);
     let err = load_from(
-        &LoadOpts { config_flag: None, index_flag: None },
+        &LoadOpts {
+            config_flag: None,
+            index_flag: None,
+        },
         &dirs(),
         &|_| None,
         Path::new("/tmp/cwd"),
-        &|p| files.get(p).cloned().ok_or_else(|| ferret::error::Error::fatal("missing")),
+        &|p| {
+            files
+                .get(p)
+                .cloned()
+                .ok_or_else(|| ferret::error::Error::fatal("missing"))
+        },
     )
     .unwrap_err();
     assert_eq!(err.exit_code(), 1);
@@ -96,13 +115,12 @@ fn load_with(
     opts: &LoadOpts,
     files: &HashMap<PathBuf, String>,
 ) -> Result<(ferret::config::Config, Vec<ferret::config::LayerSource>), ferret::error::Error> {
-    load_from(
-        opts,
-        &dirs(),
-        &|_| None,
-        Path::new("/tmp/cwd"),
-        &|p| files.get(p).cloned().ok_or_else(|| ferret::error::Error::fatal("missing")),
-    )
+    load_from(opts, &dirs(), &|_| None, Path::new("/tmp/cwd"), &|p| {
+        files
+            .get(p)
+            .cloned()
+            .ok_or_else(|| ferret::error::Error::fatal("missing"))
+    })
 }
 
 #[test]
@@ -116,7 +134,10 @@ fn roots_table_form_and_layer_sources() {
     assert_eq!(c.index.roots[0].collection, "docs");
     assert_eq!(c.index.roots[0].path, PathBuf::from("/tmp/nowhere"));
     assert_eq!(layers.len(), 2, "{layers:?}");
-    assert!(matches!(layers[1], ferret::config::LayerSource::UserFile(_)));
+    assert!(matches!(
+        layers[1],
+        ferret::config::LayerSource::UserFile(_)
+    ));
 }
 
 #[test]
@@ -152,13 +173,18 @@ fn dimensions_outside_supported_set_is_fatal() {
 #[test]
 fn cwd_file_layers_over_user_file() {
     let files = user_files(&[
-        ("/tmp/ferret-cfg/config.toml", "[search]\nmode = \"keyword\"\n"),
+        (
+            "/tmp/ferret-cfg/config.toml",
+            "[search]\nmode = \"keyword\"\n",
+        ),
         ("/tmp/cwd/.ferret.toml", "[search]\nmode = \"semantic\"\n"),
     ]);
     let (c, layers) = load_with(&LoadOpts::default(), &files).unwrap();
     assert_eq!(c.search.mode, ferret::types::SearchMode::Semantic);
     assert!(
-        layers.contains(&ferret::config::LayerSource::CwdFile(PathBuf::from("/tmp/cwd/.ferret.toml"))),
+        layers.contains(&ferret::config::LayerSource::CwdFile(PathBuf::from(
+            "/tmp/cwd/.ferret.toml"
+        ))),
         "{layers:?}"
     );
 }
@@ -170,12 +196,18 @@ fn index_flag_overrides_and_adds_flags_layer() {
         "[index]\npath = \"/tmp/other.sqlite\"\n",
     )]);
     let (c, layers) = load_with(
-        &LoadOpts { config_flag: None, index_flag: Some(PathBuf::from("/tmp/flag.sqlite")) },
+        &LoadOpts {
+            config_flag: None,
+            index_flag: Some(PathBuf::from("/tmp/flag.sqlite")),
+        },
         &files,
     )
     .unwrap();
     assert_eq!(c.index.path, PathBuf::from("/tmp/flag.sqlite"));
-    assert!(layers.contains(&ferret::config::LayerSource::Flags), "{layers:?}");
+    assert!(
+        layers.contains(&ferret::config::LayerSource::Flags),
+        "{layers:?}"
+    );
     let (c, _) = load_with(&LoadOpts::default(), &files).unwrap();
     assert_eq!(c.index.path, PathBuf::from("/tmp/other.sqlite"));
 }
@@ -216,18 +248,29 @@ fn env_derives_prefix_profile_from_merged_backend() {
             _ => None,
         },
         Path::new("/tmp/cwd"),
-        &|p| files.get(p).cloned().ok_or_else(|| ferret::error::Error::fatal("missing")),
+        &|p| {
+            files
+                .get(p)
+                .cloned()
+                .ok_or_else(|| ferret::error::Error::fatal("missing"))
+        },
     )
     .unwrap();
     assert!(matches!(c.embedder.prefix_profile, PrefixProfile::LitertLm));
     assert!(c.embedder.managed);
     assert_eq!(c.chunk.text.max_chars, 500);
-    assert!(layers.contains(&ferret::config::LayerSource::Env), "{layers:?}");
+    assert!(
+        layers.contains(&ferret::config::LayerSource::Env),
+        "{layers:?}"
+    );
 }
 
 #[test]
 fn invalid_env_values_are_fatal() {
-    for (key, value) in [("FERRET__EMBEDDER__DIMENSIONS", "not-a-number"), ("FERRET__EMBEDDER__BACKEND", "ollama")] {
+    for (key, value) in [
+        ("FERRET__EMBEDDER__DIMENSIONS", "not-a-number"),
+        ("FERRET__EMBEDDER__BACKEND", "ollama"),
+    ] {
         let err = load_from(
             &LoadOpts::default(),
             &dirs(),
@@ -242,7 +285,10 @@ fn invalid_env_values_are_fatal() {
 
 #[test]
 fn display_toml_redacts_empty_and_nonempty_api_key() {
-    let files = user_files(&[("/tmp/ferret-cfg/config.toml", "[embedder]\napi_key = \"\"\n")]);
+    let files = user_files(&[(
+        "/tmp/ferret-cfg/config.toml",
+        "[embedder]\napi_key = \"\"\n",
+    )]);
     let (c, _) = load_with(&LoadOpts::default(), &files).unwrap();
     let out = ferret::config::to_display_toml(&c);
     assert!(out.contains("api_key = \"\""), "{out}");
@@ -259,22 +305,32 @@ fn api_key_file_mode_0644_is_fatal() {
     std::fs::write(&p, "[embedder]\napi_key = \"secret\"\n").unwrap();
     std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o644)).unwrap();
     let err = load_from(
-        &LoadOpts { config_flag: Some(p.clone()), index_flag: None },
+        &LoadOpts {
+            config_flag: Some(p.clone()),
+            index_flag: None,
+        },
         &dirs(),
         &|_| None,
         Path::new("/tmp/cwd"),
-        &|path| std::fs::read_to_string(path).map_err(|e| ferret::error::Error::fatal(e.to_string())),
+        &|path| {
+            std::fs::read_to_string(path).map_err(|e| ferret::error::Error::fatal(e.to_string()))
+        },
     )
     .unwrap_err();
     assert_eq!(err.exit_code(), 1);
 
     std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o600)).unwrap();
     let (c, _) = load_from(
-        &LoadOpts { config_flag: Some(p), index_flag: None },
+        &LoadOpts {
+            config_flag: Some(p),
+            index_flag: None,
+        },
         &dirs(),
         &|_| None,
         Path::new("/tmp/cwd"),
-        &|path| std::fs::read_to_string(path).map_err(|e| ferret::error::Error::fatal(e.to_string())),
+        &|path| {
+            std::fs::read_to_string(path).map_err(|e| ferret::error::Error::fatal(e.to_string()))
+        },
     )
     .unwrap();
     assert!(ferret::config::to_display_toml(&c).contains("api_key = \"***\""));
@@ -288,7 +344,10 @@ fn env_max_size_accepts_bare_digits_and_suffixes() {
         ("2KiB", 2048),
     ] {
         let (c, _) = load_from(
-            &LoadOpts { config_flag: None, index_flag: None },
+            &LoadOpts {
+                config_flag: None,
+                index_flag: None,
+            },
             &dirs(),
             &|k| (k == "FERRET__FILES__MAX_SIZE").then(|| raw.into()),
             Path::new("/tmp/cwd"),
@@ -306,11 +365,19 @@ fn root_slash_shorthand_gets_nonempty_collection() {
         "[index]\nroots = [\"/\"]\n".into(),
     )]);
     let (c, _) = load_from(
-        &LoadOpts { config_flag: None, index_flag: None },
+        &LoadOpts {
+            config_flag: None,
+            index_flag: None,
+        },
         &dirs(),
         &|_| None,
         Path::new("/tmp/cwd"),
-        &|p| files.get(p).cloned().ok_or_else(|| ferret::error::Error::fatal("missing")),
+        &|p| {
+            files
+                .get(p)
+                .cloned()
+                .ok_or_else(|| ferret::error::Error::fatal("missing"))
+        },
     )
     .unwrap();
     assert_eq!(c.index.roots.len(), 1);

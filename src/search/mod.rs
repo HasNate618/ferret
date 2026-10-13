@@ -7,8 +7,8 @@ pub mod rrf;
 pub mod sql;
 
 pub use json::{render_human, render_json};
-pub use parse::{parse_query, FilterFlags, Filters, ParsedQuery};
-pub use rrf::{rrf, Arm};
+pub use parse::{FilterFlags, Filters, ParsedQuery, parse_query};
+pub use rrf::{Arm, rrf};
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -144,9 +144,15 @@ pub fn run_search(
         }
     }
     if want_filename {
-        for (i, row) in sql::fts_arm(conn, &keyword, &filters, candidates, Some("{filename path}"))?
-            .into_iter()
-            .enumerate()
+        for (i, row) in sql::fts_arm(
+            conn,
+            &keyword,
+            &filters,
+            candidates,
+            Some("{filename path}"),
+        )?
+        .into_iter()
+        .enumerate()
         {
             fn_scores.insert(row.chunk_id, row.display);
             entries.push((row.chunk_id, Arm::Filename, i as u32 + 1));

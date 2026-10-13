@@ -28,7 +28,10 @@ pub enum EmbedInput {
     /// Image-only input; no text prefix.
     Image { bytes: Vec<u8>, mime: String },
     /// One PDF page: image part plus optional page text, one vector.
-    PdfPage { image_png: Vec<u8>, text: Option<String> },
+    PdfPage {
+        image_png: Vec<u8>,
+        text: Option<String>,
+    },
 }
 
 /// An embedding backend. Every output is a single L2-normalized vector of

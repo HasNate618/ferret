@@ -64,7 +64,9 @@ pub fn extract_text(path: &Path, bytes: &[u8], cfg: &TextChunkConfig) -> Result<
             kind: ChunkKind::Text,
             text: Some(chunk_text),
             start_byte: spans.get(start).map(|(s, _)| *s),
-            end_byte: end.checked_sub(1).and_then(|last| spans.get(last).map(|(_, e)| *e)),
+            end_byte: end
+                .checked_sub(1)
+                .and_then(|last| spans.get(last).map(|(_, e)| *e)),
             page: None,
             embed,
             image_bytes: None,

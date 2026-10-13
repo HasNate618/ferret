@@ -9,14 +9,14 @@ pub mod skip;
 pub mod walk;
 
 pub use skip::SkipReason;
-pub use walk::{kind_for_ext, walk, WalkEvent};
+pub use walk::{WalkEvent, kind_for_ext, walk};
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::config::Config;
-use crate::embedder::{Embedder, EmbedInput};
+use crate::embedder::{EmbedInput, Embedder};
 use crate::error::{Error, Result};
 use crate::extract::{self, Chunk, EmbedDecision};
 use crate::fingerprint;
@@ -308,8 +308,16 @@ fn index_pdf_file(
         Ok(md) => md,
         Err(e) => {
             record_pdf_error(
-                store, &mut sink, path, &path_str, &job.collection, &job.ext,
-                config_fp, 1, &Error::fatal(e.to_string()), summary,
+                store,
+                &mut sink,
+                path,
+                &path_str,
+                &job.collection,
+                &job.ext,
+                config_fp,
+                1,
+                &Error::fatal(e.to_string()),
+                summary,
             )?;
             return Ok(true);
         }
@@ -340,8 +348,16 @@ fn index_pdf_file(
         Ok(b) => b,
         Err(e) => {
             record_pdf_error(
-                store, &mut sink, path, &path_str, &job.collection, &job.ext,
-                config_fp, 1, &e, summary,
+                store,
+                &mut sink,
+                path,
+                &path_str,
+                &job.collection,
+                &job.ext,
+                config_fp,
+                1,
+                &e,
+                summary,
             )?;
             return Ok(true);
         }
@@ -350,8 +366,16 @@ fn index_pdf_file(
         Ok(n) => n,
         Err(e) => {
             record_pdf_error(
-                store, &mut sink, path, &path_str, &job.collection, &job.ext,
-                config_fp, 1, &e, summary,
+                store,
+                &mut sink,
+                path,
+                &path_str,
+                &job.collection,
+                &job.ext,
+                config_fp,
+                1,
+                &e,
+                summary,
             )?;
             return Ok(true);
         }
@@ -445,8 +469,16 @@ fn index_pdf_file(
     let ceiling = (cfg.chunk.pdf.max_pages as i64).min(n as i64);
     if let Some(message) = failed {
         record_pdf_error(
-            store, &mut sink, path, &path_str, &job.collection, &job.ext,
-            config_fp, next_page, &Error::fatal(message), summary,
+            store,
+            &mut sink,
+            path,
+            &path_str,
+            &job.collection,
+            &job.ext,
+            config_fp,
+            next_page,
+            &Error::fatal(message),
+            summary,
         )?;
         return Ok(true);
     }
@@ -551,10 +583,7 @@ fn process_pdf_page(
     };
     let input = match (png_bytes, cfg.chunk.pdf.embed_text, stored_text.clone()) {
         (Some(bytes), false, _) => PageInput::Img(bytes),
-        (Some(bytes), true, text) => PageInput::Pdf {
-            png: bytes,
-            text,
-        },
+        (Some(bytes), true, text) => PageInput::Pdf { png: bytes, text },
         (None, true, Some(t)) => PageInput::Doc(t),
         (None, _, _) => PageInput::Skip,
     };
@@ -628,7 +657,15 @@ fn process_pdf_page(
                 end_byte: None,
             },
         )?;
-        store.insert_vec(&tx, chunk_id, &vector, FileKind::Pdf, ext, mtime, collection)?;
+        store.insert_vec(
+            &tx,
+            chunk_id,
+            &vector,
+            FileKind::Pdf,
+            ext,
+            mtime,
+            collection,
+        )?;
     }
     store.set_pdf_progress(&tx, file_id, page as i64 + 1, false, None)?;
     tx.commit()?;
@@ -845,7 +882,10 @@ fn pdf_embed_text_changed(store: &Store, cfg: &Config) -> bool {
 /// failing the run. The `chunks_fts_au` trigger mirrors each rewrite.
 fn refresh_pdf_texts(store: &Store, cfg: &Config, err: &mut dyn std::io::Write) {
     let Ok(pdftotext) = crate::extract::pdf::resolve_tool(&cfg.extract, "pdftotext") else {
-        let _ = writeln!(err, "warning: skipping PDF text refresh (pdftotext not found)");
+        let _ = writeln!(
+            err,
+            "warning: skipping PDF text refresh (pdftotext not found)"
+        );
         return;
     };
     let files: Vec<(i64, String)> = match (|| -> Result<Vec<(i64, String)>> {
@@ -865,11 +905,9 @@ fn refresh_pdf_texts(store: &Store, cfg: &Config, err: &mut dyn std::io::Write) 
             continue;
         };
         for page in pages {
-            let Ok(text) = crate::extract::pdf::page_text(
-                Path::new(&path),
-                page as u32,
-                &pdftotext,
-            ) else {
+            let Ok(text) =
+                crate::extract::pdf::page_text(Path::new(&path), page as u32, &pdftotext)
+            else {
                 let _ = writeln!(
                     err,
                     "warning: PDF text refresh failed for {} page {page} (keeping stale text)",
@@ -907,11 +945,15 @@ fn reset_pdf_vecs(store: &Store) -> Result<()> {
 fn conn_delete_kind(store: &Store, kind_filter: &str) -> Result<()> {
     let conn = store.conn();
     conn.execute(
-        &format!("DELETE FROM chunks_vec WHERE rowid IN (SELECT id FROM chunks WHERE {kind_filter})"),
+        &format!(
+            "DELETE FROM chunks_vec WHERE rowid IN (SELECT id FROM chunks WHERE {kind_filter})"
+        ),
         [],
     )?;
     conn.execute(
-        &format!("DELETE FROM chunks_fts WHERE rowid IN (SELECT id FROM chunks WHERE {kind_filter})"),
+        &format!(
+            "DELETE FROM chunks_fts WHERE rowid IN (SELECT id FROM chunks WHERE {kind_filter})"
+        ),
         [],
     )?;
     conn.execute(&format!("DELETE FROM chunks WHERE {kind_filter}"), [])?;
@@ -1027,26 +1069,40 @@ fn index_file(
                 Ok(chunks) => chunks,
                 Err(e) => {
                     record_extract_error(
-                        store, &mut sink, &path, &collection, kind, &ext, config_fp, e, summary,
+                        store,
+                        &mut sink,
+                        &path,
+                        &collection,
+                        kind,
+                        &ext,
+                        config_fp,
+                        e,
+                        summary,
                     );
                     return Ok(());
                 }
             }
         }
-        FileKind::Image => match extract::image::extract_image(
-            &path,
-            &cfg.chunk.image,
-            cache_dir,
-            cfg.files.heic,
-        ) {
-            Ok(chunks) => chunks,
-            Err(e) => {
-                record_extract_error(
-                    store, &mut sink, &path, &collection, kind, &ext, config_fp, e, summary,
-                );
-                return Ok(());
+        FileKind::Image => {
+            match extract::image::extract_image(&path, &cfg.chunk.image, cache_dir, cfg.files.heic)
+            {
+                Ok(chunks) => chunks,
+                Err(e) => {
+                    record_extract_error(
+                        store,
+                        &mut sink,
+                        &path,
+                        &collection,
+                        kind,
+                        &ext,
+                        config_fp,
+                        e,
+                        summary,
+                    );
+                    return Ok(());
+                }
             }
-        },
+        }
         FileKind::Pdf => {
             // Unreachable via run(): PDFs route through index_pdf_file
             // (two-pass scheduler). Defensive: never silently embed a PDF
@@ -1096,7 +1152,15 @@ fn index_file(
         Ok(vectors) => vectors,
         Err(e) if e.is_file_error() => {
             record_extract_error(
-                store, &mut sink, &path, &collection, kind, &ext, config_fp, e, summary,
+                store,
+                &mut sink,
+                &path,
+                &collection,
+                kind,
+                &ext,
+                config_fp,
+                e,
+                summary,
             );
             return Ok(());
         }

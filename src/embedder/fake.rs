@@ -1,7 +1,7 @@
 //! Deterministic fake embedder (`FERRET_EMBEDDER=fake`): blake3-derived unit
 //! vectors, independent of any server. Test hook only.
 
-use super::{l2_normalize, EmbedInput, Embedder};
+use super::{EmbedInput, Embedder, l2_normalize};
 use crate::error::Result;
 use crate::types::PrefixProfile;
 
@@ -19,7 +19,10 @@ impl FakeEmbedder {
     /// Fake embedder carrying the merged-config profile so vectors follow
     /// the active prefix strings.
     pub fn new_with_profile(profile: PrefixProfile, dimensions: u32) -> Self {
-        Self { profile, dimensions }
+        Self {
+            profile,
+            dimensions,
+        }
     }
 
     /// `blake3(prefix || 0x1f || payload)`: the prefix is the profile's text

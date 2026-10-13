@@ -126,7 +126,10 @@ mod tests {
         assert_eq!(ChunkKind::PdfPage.to_string(), "pdf_page");
         assert_eq!(Backend::LlamaServer.to_string(), "llama_server");
         assert_eq!(Backend::LitertLm.to_string(), "litert_lm");
-        assert_eq!(PrefixProfile::EmbeddingGemma2.to_string(), "embeddinggemma2");
+        assert_eq!(
+            PrefixProfile::EmbeddingGemma2.to_string(),
+            "embeddinggemma2"
+        );
         assert_eq!(SearchMode::Hybrid.to_string(), "hybrid");
         assert_eq!(TextChunkMode::Sentences.to_string(), "sentences");
         assert_eq!(HeicMode::Skip.to_string(), "skip");

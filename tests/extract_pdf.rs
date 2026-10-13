@@ -4,7 +4,7 @@
 
 use std::path::{Path, PathBuf};
 
-use ferret::config::{compiled_defaults, ExtractConfig};
+use ferret::config::{ExtractConfig, compiled_defaults};
 use ferret::extract::pdf::{page_count, page_text, render_page, resolve_tool};
 
 fn test_dirs() -> ferret::paths::FerretDirs {
@@ -38,7 +38,10 @@ fn page_count_of_fixture_is_two() {
     }
     let cfg = extract_cfg();
     let pdfinfo = resolve_tool(&cfg, "pdfinfo").unwrap();
-    assert_eq!(page_count(Path::new("testdata/two_pages.pdf"), &pdfinfo).unwrap(), 2);
+    assert_eq!(
+        page_count(Path::new("testdata/two_pages.pdf"), &pdfinfo).unwrap(),
+        2
+    );
 }
 
 #[test]
@@ -50,9 +53,15 @@ fn page_text_matches_fixture() {
     let cfg = extract_cfg();
     let pdftotext = resolve_tool(&cfg, "pdftotext").unwrap();
     let t1 = page_text(Path::new("testdata/two_pages.pdf"), 1, &pdftotext).unwrap();
-    assert!(t1.contains("page one pets"), "unexpected page 1 text: {t1:?}");
+    assert!(
+        t1.contains("page one pets"),
+        "unexpected page 1 text: {t1:?}"
+    );
     let t2 = page_text(Path::new("testdata/two_pages.pdf"), 2, &pdftotext).unwrap();
-    assert!(t2.contains("page two ferrets"), "unexpected page 2 text: {t2:?}");
+    assert!(
+        t2.contains("page two ferrets"),
+        "unexpected page 2 text: {t2:?}"
+    );
 }
 
 #[test]
@@ -140,7 +149,10 @@ fn resolve_priority_is_explicit_then_poppler_dir_then_path() {
     // poppler_dir wins over PATH (whatever PATH holds).
     let mut cfg = extract_cfg();
     cfg.poppler_dir = tools.to_str().unwrap().to_string();
-    assert_eq!(resolve_tool(&cfg, "pdfinfo").unwrap(), tools.join("pdfinfo"));
+    assert_eq!(
+        resolve_tool(&cfg, "pdfinfo").unwrap(),
+        tools.join("pdfinfo")
+    );
     // ...and the stub actually answers through the real call path.
     assert_eq!(
         page_count(Path::new("whatever.pdf"), &tools.join("pdfinfo")).unwrap(),
@@ -151,5 +163,8 @@ fn resolve_priority_is_explicit_then_poppler_dir_then_path() {
     cfg.pdftotext = "/no/such/pdftotext".to_string();
     let err = resolve_tool(&cfg, "pdftotext").unwrap_err();
     assert!(err.to_string().contains("pdftotext"), "unexpected: {err}");
-    assert!(err.to_string().contains("/no/such/pdftotext"), "unexpected: {err}");
+    assert!(
+        err.to_string().contains("/no/such/pdftotext"),
+        "unexpected: {err}"
+    );
 }

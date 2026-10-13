@@ -4,8 +4,8 @@
 use std::path::Path;
 
 use ferret::config::ImageChunkConfig;
-use ferret::extract::image::extract_image;
 use ferret::extract::EmbedDecision;
+use ferret::extract::image::extract_image;
 use ferret::types::{ChunkKind, HeicMode};
 use image::GenericImageView;
 
@@ -96,7 +96,10 @@ fn corrupt_image_is_extract_error() {
     let bad = tmp.path().join("bad.png");
     std::fs::write(&bad, b"this is not an image").unwrap();
     let err = extract_image(&bad, &img_cfg(1024), tmp.path(), HeicMode::Skip).unwrap_err();
-    assert!(err.is_file_error(), "corrupt image is a per-file failure: {err}");
+    assert!(
+        err.is_file_error(),
+        "corrupt image is a per-file failure: {err}"
+    );
 }
 
 #[test]
@@ -139,7 +142,9 @@ fn host_has_magick() -> bool {
         std::env::split_paths(&paths)
             .filter(|dir| !dir.as_os_str().is_empty())
             .any(|dir| {
-                ["magick", "convert"].iter().any(|bin| is_exec(&dir.join(bin)))
+                ["magick", "convert"]
+                    .iter()
+                    .any(|bin| is_exec(&dir.join(bin)))
             })
     })
 }

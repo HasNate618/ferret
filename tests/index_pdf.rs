@@ -30,8 +30,21 @@ fn fake_for(cfg: &ferret::config::Config) -> ferret::embedder::FakeEmbedder {
 fn run_json(cfg: &ferret::config::Config) -> (ferret::index::IndexSummary, String, String) {
     let mut stdout: Vec<u8> = Vec::new();
     let mut stderr: Vec<u8> = Vec::new();
-    let summary = ferret::index::run(&cfg, &fake_for(cfg), vec![], true, false, &mut stdout, &mut stderr).unwrap();
-    (summary, String::from_utf8(stdout).unwrap(), String::from_utf8(stderr).unwrap())
+    let summary = ferret::index::run(
+        &cfg,
+        &fake_for(cfg),
+        vec![],
+        true,
+        false,
+        &mut stdout,
+        &mut stderr,
+    )
+    .unwrap();
+    (
+        summary,
+        String::from_utf8(stdout).unwrap(),
+        String::from_utf8(stderr).unwrap(),
+    )
 }
 
 /// (complete, next_page, error) for the file whose path ends in `name`.
@@ -41,13 +54,9 @@ fn pdf_row(index: &std::path::Path, name: &str) -> Option<(i64, Option<i64>, Opt
         .prepare("SELECT complete, next_page, error FROM files WHERE path LIKE ?1")
         .unwrap();
     let mut rows = stmt.query([format!("%{name}")]).unwrap();
-    rows.next().unwrap().map(|r| {
-        (
-            r.get(0).unwrap(),
-            r.get(1).unwrap(),
-            r.get(2).unwrap(),
-        )
-    })
+    rows.next()
+        .unwrap()
+        .map(|r| (r.get(0).unwrap(), r.get(1).unwrap(), r.get(2).unwrap()))
 }
 
 /// Sorted page numbers present in chunks for the file.
@@ -112,7 +121,10 @@ fn two_pages_yield_two_chunks_with_pages_and_ordinals() {
     assert_eq!(ordinals, vec![0, 1]);
     let (complete, next_page, _) = pdf_row(&env.index, "doc.pdf").expect("pdf row must exist");
     assert_eq!(complete, 1);
-    assert!(next_page.unwrap_or(0) > 2, "cursor must advance past page 2");
+    assert!(
+        next_page.unwrap_or(0) > 2,
+        "cursor must advance past page 2"
+    );
     // Page text is stored for FTS.
     let text: String = conn
         .query_row(
@@ -122,7 +134,10 @@ fn two_pages_yield_two_chunks_with_pages_and_ordinals() {
             |r| r.get(0),
         )
         .unwrap();
-    assert!(text.contains("page one pets"), "unexpected stored text: {text:?}");
+    assert!(
+        text.contains("page one pets"),
+        "unexpected stored text: {text:?}"
+    );
 }
 
 #[test]
@@ -241,7 +256,10 @@ fn missing_poppler_is_extract_error() {
     let (complete, _, error) = pdf_row(&env.index, "doc.pdf").expect("row");
     assert_eq!(complete, 0);
     let error = error.expect("error must be recorded");
-    assert!(error.contains("pdfinfo"), "resolve order is pdfinfo first: {error}");
+    assert!(
+        error.contains("pdfinfo"),
+        "resolve order is pdfinfo first: {error}"
+    );
     assert!(error.contains("not found"), "unexpected error: {error}");
 }
 
@@ -335,7 +353,9 @@ fn failed_page_two_keeps_committed_page_one() {
     std::fs::remove_file(env.root.join("pets.md")).unwrap();
     fixture_pdf(&env.root);
     let cfg = load_cfg();
-    let failer = FailPageTwo { inner: fake_for(&cfg) };
+    let failer = FailPageTwo {
+        inner: fake_for(&cfg),
+    };
     let mut stdout: Vec<u8> = Vec::new();
     let mut stderr: Vec<u8> = Vec::new();
     let summary =
@@ -376,11 +396,22 @@ fn embed_text_false_embeds_pages_as_bare_images() {
     };
     let mut stdout: Vec<u8> = Vec::new();
     let mut stderr: Vec<u8> = Vec::new();
-    let summary =
-        ferret::index::run(&cfg, &recorder, vec![], true, false, &mut stdout, &mut stderr).unwrap();
+    let summary = ferret::index::run(
+        &cfg,
+        &recorder,
+        vec![],
+        true,
+        false,
+        &mut stdout,
+        &mut stderr,
+    )
+    .unwrap();
     assert_eq!(summary.errors, 0);
     // Spec §4.4(5): bare image per page, no document prefix.
-    assert_eq!(recorder.kinds(), vec!["Image".to_string(), "Image".to_string()]);
+    assert_eq!(
+        recorder.kinds(),
+        vec!["Image".to_string(), "Image".to_string()]
+    );
     // ...while pdftotext is still stored for FTS.
     let conn = rusqlite::Connection::open(&env.index).unwrap();
     let text: String = conn
@@ -391,7 +422,10 @@ fn embed_text_false_embeds_pages_as_bare_images() {
             |r| r.get(0),
         )
         .unwrap();
-    assert!(text.contains("page one pets"), "unexpected stored text: {text:?}");
+    assert!(
+        text.contains("page one pets"),
+        "unexpected stored text: {text:?}"
+    );
 }
 
 #[test]

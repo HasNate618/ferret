@@ -79,7 +79,10 @@ fn ext_of(path: &Path) -> String {
 
 /// File kind for a lowercase extension (no dot), or `None` when the
 /// extension is unsupported in this index.
-pub fn kind_for_ext(ext: &str, map: &std::collections::BTreeMap<String, FileKind>) -> Option<FileKind> {
+pub fn kind_for_ext(
+    ext: &str,
+    map: &std::collections::BTreeMap<String, FileKind>,
+) -> Option<FileKind> {
     map.get(ext).copied()
 }
 
@@ -140,7 +143,8 @@ where
     let mut builder = GlobSetBuilder::new();
     for p in patterns {
         let p = p.as_ref();
-        let glob = globset::Glob::new(p).map_err(|e| Error::usage(format!("bad glob `{p}`: {e}")))?;
+        let glob =
+            globset::Glob::new(p).map_err(|e| Error::usage(format!("bad glob `{p}`: {e}")))?;
         builder.add(glob);
     }
     builder
@@ -177,8 +181,7 @@ impl Walker<'_> {
             }
         }
 
-        let mut entries: Vec<_> = std::fs::read_dir(dir)?
-            .collect::<std::io::Result<Vec<_>>>()?;
+        let mut entries: Vec<_> = std::fs::read_dir(dir)?.collect::<std::io::Result<Vec<_>>>()?;
         entries.sort_by_key(|e| e.file_name());
 
         for entry in entries {
@@ -200,8 +203,7 @@ impl Walker<'_> {
                 self.skip(&path, SkipReason::SkipRule);
                 continue;
             }
-            if !is_dir
-                && self.is_sensitive(path.file_name().and_then(|n| n.to_str()).unwrap_or(""))
+            if !is_dir && self.is_sensitive(path.file_name().and_then(|n| n.to_str()).unwrap_or(""))
             {
                 self.skip(&path, SkipReason::SkipRule);
                 continue;
@@ -319,7 +321,8 @@ impl Walker<'_> {
 
     fn is_sensitive(&self, basename: &str) -> bool {
         // `id_*` key files, except the public halves (`id_*.pub`).
-        (basename.starts_with("id_") && !basename.ends_with(".pub")) || self.sensitive.is_match(basename)
+        (basename.starts_with("id_") && !basename.ends_with(".pub"))
+            || self.sensitive.is_match(basename)
     }
 
     fn oversize(&self, path: &Path) -> bool {
@@ -330,9 +333,7 @@ impl Walker<'_> {
     }
 
     fn ignored(&self, ignores: &[Gitignore], path: &Path, is_dir: bool) -> bool {
-        ignores
-            .iter()
-            .any(|g| g.matched(path, is_dir).is_ignore())
+        ignores.iter().any(|g| g.matched(path, is_dir).is_ignore())
     }
 
     fn skip(&mut self, path: &Path, reason: SkipReason) {

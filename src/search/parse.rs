@@ -137,7 +137,11 @@ pub fn parse_query(raw: &str, flag_overrides: &FilterFlags) -> Result<ParsedQuer
     let ext = if flag_overrides.ext.is_empty() {
         ext
     } else {
-        flag_overrides.ext.iter().map(|e| normalize_ext(e)).collect()
+        flag_overrides
+            .ext
+            .iter()
+            .map(|e| normalize_ext(e))
+            .collect()
     };
     let under = match &flag_overrides.under {
         Some(p) => Some(canonical_dir(&p.to_string_lossy())?),
@@ -183,7 +187,16 @@ pub fn parse_query(raw: &str, flag_overrides: &FilterFlags) -> Result<ParsedQuer
 fn is_known_prefix(head: &str) -> bool {
     matches!(
         head,
-        "kind" | "type" | "ext" | "path" | "under" | "collection" | "name" | "after" | "before" | "code"
+        "kind"
+            | "type"
+            | "ext"
+            | "path"
+            | "under"
+            | "collection"
+            | "name"
+            | "after"
+            | "before"
+            | "code"
     )
 }
 

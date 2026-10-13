@@ -77,9 +77,7 @@ pub fn page_count(path: &Path, pdfinfo: &Path) -> Result<u32> {
                 None
             }
         })
-        .ok_or_else(|| {
-            Error::fatal(format!("pdfinfo gave no page count for {}", path.display()))
-        })
+        .ok_or_else(|| Error::fatal(format!("pdfinfo gave no page count for {}", path.display())))
 }
 
 /// `pdftotext -f N -l N -layout <path> -`: page text (possibly empty for

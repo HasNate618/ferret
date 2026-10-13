@@ -2,7 +2,7 @@
 
 mod common;
 
-use ferret::config::{compiled_defaults, Config};
+use ferret::config::{Config, compiled_defaults};
 use ferret::store::{self, NewChunk, NewFile, Store};
 use ferret::types::{Backend, ChunkKind, FileKind, PrefixProfile};
 use std::cell::RefCell;
@@ -144,13 +144,36 @@ fn backend_only_change_is_a_warning_not_an_error() {
 #[test]
 fn new_index_writes_initial_meta() {
     let store = open_temp(768);
-    assert_eq!(store.get_meta("schema_version").unwrap().as_deref(), Some("1"));
-    assert_eq!(store.get_meta("model_id").unwrap().as_deref(), Some("embeddinggemma-2"));
-    assert_eq!(store.get_meta("dimensions").unwrap().as_deref(), Some("768"));
-    assert_eq!(store.get_meta("prefix_profile").unwrap().as_deref(), Some("embeddinggemma2"));
-    assert_eq!(store.get_meta("backend").unwrap().as_deref(), Some("llama_server"));
-    for key in ["images_supported", "config_fingerprint", "text_pipeline", "image_pipeline"] {
-        assert!(store.get_meta(key).unwrap().is_some(), "meta key {key} missing");
+    assert_eq!(
+        store.get_meta("schema_version").unwrap().as_deref(),
+        Some("1")
+    );
+    assert_eq!(
+        store.get_meta("model_id").unwrap().as_deref(),
+        Some("embeddinggemma-2")
+    );
+    assert_eq!(
+        store.get_meta("dimensions").unwrap().as_deref(),
+        Some("768")
+    );
+    assert_eq!(
+        store.get_meta("prefix_profile").unwrap().as_deref(),
+        Some("embeddinggemma2")
+    );
+    assert_eq!(
+        store.get_meta("backend").unwrap().as_deref(),
+        Some("llama_server")
+    );
+    for key in [
+        "images_supported",
+        "config_fingerprint",
+        "text_pipeline",
+        "image_pipeline",
+    ] {
+        assert!(
+            store.get_meta(key).unwrap().is_some(),
+            "meta key {key} missing"
+        );
     }
     assert_eq!(store.get_meta("nope").unwrap(), None);
 }
@@ -159,34 +182,63 @@ fn new_index_writes_initial_meta() {
 fn file_kind_metadata_is_files_kind_not_chunk_kind() {
     let store = open_temp(8);
     let tx = store.begin().unwrap();
-    let fid = store.upsert_file(&NewFile {
-        path: "/a/lease.pdf".into(), collection: "Documents".into(),
-        kind: FileKind::Pdf, ext: "pdf".into(), size: 1, mtime: 1,
-        fingerprint: "x".into(), complete: true, next_page: Some(3),
-        skip_reason: None, indexed_at: 1, error: None,
-    }).unwrap();
-    let cid = store.insert_chunk(&tx, NewChunk {
-        file_id: fid, ordinal: 0, page: Some(1), kind: ChunkKind::PdfPage,
-        text: Some("pets".into()), start_byte: None, end_byte: None,
-    }).unwrap();
+    let fid = store
+        .upsert_file(&NewFile {
+            path: "/a/lease.pdf".into(),
+            collection: "Documents".into(),
+            kind: FileKind::Pdf,
+            ext: "pdf".into(),
+            size: 1,
+            mtime: 1,
+            fingerprint: "x".into(),
+            complete: true,
+            next_page: Some(3),
+            skip_reason: None,
+            indexed_at: 1,
+            error: None,
+        })
+        .unwrap();
+    let cid = store
+        .insert_chunk(
+            &tx,
+            NewChunk {
+                file_id: fid,
+                ordinal: 0,
+                page: Some(1),
+                kind: ChunkKind::PdfPage,
+                text: Some("pets".into()),
+                start_byte: None,
+                end_byte: None,
+            },
+        )
+        .unwrap();
     let mut v = vec![0.0_f32; 8];
     v[0] = 1.0;
-    store.insert_vec(&tx, cid, &v, FileKind::Pdf, "pdf", 1, "Documents").unwrap();
+    store
+        .insert_vec(&tx, cid, &v, FileKind::Pdf, "pdf", 1, "Documents")
+        .unwrap();
     tx.commit().unwrap();
-    let kind: String = store.conn().query_row(
-        "select file_kind from chunks_vec where rowid = ?",
-        [cid],
-        |r| r.get(0),
-    ).unwrap();
+    let kind: String = store
+        .conn()
+        .query_row(
+            "select file_kind from chunks_vec where rowid = ?",
+            [cid],
+            |r| r.get(0),
+        )
+        .unwrap();
     assert_eq!(kind, "pdf");
 }
 
 #[test]
 fn empty_text_is_stored_as_null() {
     let store = open_temp(8);
-    let fid = store.upsert_file(&file("/a/empty.txt", FileKind::Text)).unwrap();
+    let fid = store
+        .upsert_file(&file("/a/empty.txt", FileKind::Text))
+        .unwrap();
     let tx = store.begin().unwrap();
-    let cid = store.insert_chunk(&tx, chunk(fid, 0, ChunkKind::Text, Some(""))).unwrap();
+    let cid = store
+        .insert_chunk(&tx, chunk(fid, 0, ChunkKind::Text, Some("")))
+        .unwrap();
     tx.commit().unwrap();
     let text: Option<String> = store
         .conn()
@@ -228,20 +280,34 @@ fn upsert_file_roundtrip_and_delete() {
 #[test]
 fn delete_file_cascades_chunks_and_vec_rows() {
     let store = open_temp(8);
-    let fid = store.upsert_file(&file("/a/one.txt", FileKind::Text)).unwrap();
+    let fid = store
+        .upsert_file(&file("/a/one.txt", FileKind::Text))
+        .unwrap();
     let tx = store.begin().unwrap();
-    let cid = store.insert_chunk(&tx, chunk(fid, 0, ChunkKind::Text, Some("hello"))).unwrap();
+    let cid = store
+        .insert_chunk(&tx, chunk(fid, 0, ChunkKind::Text, Some("hello")))
+        .unwrap();
     store
-        .insert_vec(&tx, cid, &[1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], FileKind::Text, "txt", 1, "Documents")
+        .insert_vec(
+            &tx,
+            cid,
+            &[1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            FileKind::Text,
+            "txt",
+            1,
+            "Documents",
+        )
         .unwrap();
     tx.commit().unwrap();
 
     assert!(store.delete_file_by_path("/a/one.txt").unwrap());
     let counts: (i64, i64) = store
         .conn()
-        .query_row("select (select count(*) from chunks), (select count(*) from chunks_vec)", [], |r| {
-            Ok((r.get(0)?, r.get(1)?))
-        })
+        .query_row(
+            "select (select count(*) from chunks), (select count(*) from chunks_vec)",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
         .unwrap();
     assert_eq!(counts, (0, 0));
 }
@@ -250,17 +316,37 @@ fn delete_file_cascades_chunks_and_vec_rows() {
 fn delete_chunk_kind_sides_keep_the_other_side() {
     let store = open_temp(8);
     // Text file: only a 'text' chunk. PDF: 'pdf_page' + 'image' chunks.
-    let fid_text = store.upsert_file(&file("/a/t.txt", FileKind::Text)).unwrap();
-    let fid_pdf = store.upsert_file(&file("/a/mix.pdf", FileKind::Pdf)).unwrap();
+    let fid_text = store
+        .upsert_file(&file("/a/t.txt", FileKind::Text))
+        .unwrap();
+    let fid_pdf = store
+        .upsert_file(&file("/a/mix.pdf", FileKind::Pdf))
+        .unwrap();
     let tx = store.begin().unwrap();
-    let c_text = store.insert_chunk(&tx, chunk(fid_text, 0, ChunkKind::Text, Some("body"))).unwrap();
-    let c_page = store.insert_chunk(&tx, NewChunk {
-        file_id: fid_pdf, ordinal: 0, page: Some(1), kind: ChunkKind::PdfPage,
-        text: Some("page".into()), start_byte: None, end_byte: None,
-    }).unwrap();
-    let c_img = store.insert_chunk(&tx, chunk(fid_pdf, 1, ChunkKind::Image, None)).unwrap();
+    let c_text = store
+        .insert_chunk(&tx, chunk(fid_text, 0, ChunkKind::Text, Some("body")))
+        .unwrap();
+    let c_page = store
+        .insert_chunk(
+            &tx,
+            NewChunk {
+                file_id: fid_pdf,
+                ordinal: 0,
+                page: Some(1),
+                kind: ChunkKind::PdfPage,
+                text: Some("page".into()),
+                start_byte: None,
+                end_byte: None,
+            },
+        )
+        .unwrap();
+    let c_img = store
+        .insert_chunk(&tx, chunk(fid_pdf, 1, ChunkKind::Image, None))
+        .unwrap();
     for cid in [c_text, c_page, c_img] {
-        store.insert_vec(&tx, cid, &[0.5; 8], FileKind::Text, "txt", 1, "Documents").unwrap();
+        store
+            .insert_vec(&tx, cid, &[0.5; 8], FileKind::Text, "txt", 1, "Documents")
+            .unwrap();
     }
     tx.commit().unwrap();
 
@@ -277,7 +363,11 @@ fn delete_chunk_kind_sides_keep_the_other_side() {
     assert_eq!(pdf_kinds, vec!["pdf_page".to_string(), "image".to_string()]);
     let text_file_chunks: i64 = store
         .conn()
-        .query_row("select count(*) from chunks where file_id = ?", [fid_text], |r| r.get(0))
+        .query_row(
+            "select count(*) from chunks where file_id = ?",
+            [fid_text],
+            |r| r.get(0),
+        )
         .unwrap();
     assert_eq!(text_file_chunks, 1);
 
@@ -285,13 +375,21 @@ fn delete_chunk_kind_sides_keep_the_other_side() {
     store.delete_image_chunks_keep_text(fid_pdf).unwrap();
     let pdf_left: i64 = store
         .conn()
-        .query_row("select count(*) from chunks where file_id = ?", [fid_pdf], |r| r.get(0))
+        .query_row(
+            "select count(*) from chunks where file_id = ?",
+            [fid_pdf],
+            |r| r.get(0),
+        )
         .unwrap();
     assert_eq!(pdf_left, 0);
     store.delete_image_chunks_keep_text(fid_text).unwrap();
     let text_left: i64 = store
         .conn()
-        .query_row("select count(*) from chunks where file_id = ?", [fid_text], |r| r.get(0))
+        .query_row(
+            "select count(*) from chunks where file_id = ?",
+            [fid_text],
+            |r| r.get(0),
+        )
         .unwrap();
     assert_eq!(text_left, 1);
     // Vector rows follow their chunks.
@@ -306,7 +404,17 @@ fn delete_chunk_kind_sides_keep_the_other_side() {
 fn status_counts_reflects_rows() {
     let store = open_temp(8);
     let c0 = store.status_counts().unwrap();
-    assert_eq!((c0.files_text, c0.files_image, c0.files_pdf, c0.chunks, c0.incomplete, c0.errors), (0, 0, 0, 0, 0, 0));
+    assert_eq!(
+        (
+            c0.files_text,
+            c0.files_image,
+            c0.files_pdf,
+            c0.chunks,
+            c0.incomplete,
+            c0.errors
+        ),
+        (0, 0, 0, 0, 0, 0)
+    );
     assert_eq!(c0.indexed_at_max, None);
 
     let mut t = file("/a/t.txt", FileKind::Text);
@@ -317,7 +425,9 @@ fn status_counts_reflects_rows() {
     p.error = Some("boom".into());
     p.indexed_at = 7;
     store.upsert_file(&p).unwrap();
-    store.upsert_file(&file("/a/i.png", FileKind::Image)).unwrap();
+    store
+        .upsert_file(&file("/a/i.png", FileKind::Image))
+        .unwrap();
     let c1 = store.status_counts().unwrap();
     assert_eq!((c1.files_text, c1.files_image, c1.files_pdf), (1, 1, 1));
     assert_eq!(c1.incomplete, 1);
@@ -327,7 +437,9 @@ fn status_counts_reflects_rows() {
 
     let fid = store.get_file_by_path("/a/t.txt").unwrap().unwrap().id;
     let tx = store.begin().unwrap();
-    store.insert_chunk(&tx, chunk(fid, 0, ChunkKind::Text, Some("x"))).unwrap();
+    store
+        .insert_chunk(&tx, chunk(fid, 0, ChunkKind::Text, Some("x")))
+        .unwrap();
     tx.commit().unwrap();
     let c2 = store.status_counts().unwrap();
     assert_eq!(c2.chunks, 1);

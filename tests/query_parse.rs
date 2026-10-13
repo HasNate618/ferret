@@ -1,6 +1,6 @@
 //! Task 7 integration tests: search query parsing (prefixes, hyphens, dates).
 
-use ferret::search::{parse_query, FilterFlags};
+use ferret::search::{FilterFlags, parse_query};
 use ferret::types::{FileKind, QueryTask};
 
 #[test]
@@ -51,15 +51,17 @@ fn code_prefix_sets_task() {
 
 #[test]
 fn invalid_date_is_usage() {
-    let err = parse_query("after:2026-13-01 x", &FilterFlags::default())
-        .unwrap_err();
+    let err = parse_query("after:2026-13-01 x", &FilterFlags::default()).unwrap_err();
     assert_eq!(err.exit_code(), 2);
 }
 
 #[test]
 fn quoted_prefix_value_keeps_spaces() {
     let p = parse_query("under:\"/tmp\" pets", &FilterFlags::default()).unwrap();
-    assert_eq!(p.filters.under, Some(std::fs::canonicalize("/tmp").unwrap()));
+    assert_eq!(
+        p.filters.under,
+        Some(std::fs::canonicalize("/tmp").unwrap())
+    );
     assert_eq!(p.nl_query, "pets");
 }
 

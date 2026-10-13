@@ -13,8 +13,7 @@ use crate::error::{Error, Result};
 
 /// 1x1 transparent PNG (RFC 2083 minimal IDAT), base64. Sent as a data URL
 /// by [`probe_images`]; the server never sees a real corpus image here.
-pub const PROBE_PNG_BASE64: &str =
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+pub const PROBE_PNG_BASE64: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
 
 /// Verify the server is up. `GET {endpoint}/health` 200 wins; 404 falls
 /// back to a probe `POST {endpoint}/v1/embeddings` with input `"ok"` for
@@ -26,7 +25,10 @@ pub fn check_health(client: &Client, cfg: &Config) -> Result<()> {
     match client.get(health_url).send() {
         Ok(resp) if resp.status().is_success() => Ok(()),
         Ok(resp) if resp.status() == reqwest::StatusCode::NOT_FOUND => probe_post(client, cfg),
-        Ok(resp) => Err(health_down(cfg, &format!("GET /health -> {}", resp.status()))),
+        Ok(resp) => Err(health_down(
+            cfg,
+            &format!("GET /health -> {}", resp.status()),
+        )),
         Err(e) => Err(health_down(cfg, &e.to_string())),
     }
 }
@@ -68,7 +70,9 @@ pub fn probe_images(client: &Client, cfg: &Config) -> bool {
         }),
         _ => super::http::image_body(cfg, &png),
     };
-    let resp = authed(client.post(embeddings_url(cfg)), cfg).json(&body).send();
+    let resp = authed(client.post(embeddings_url(cfg)), cfg)
+        .json(&body)
+        .send();
     match resp {
         Ok(r) if r.status().is_success() => r
             .json::<serde_json::Value>()
@@ -88,7 +92,10 @@ pub fn base_url(cfg: &Config) -> String {
 }
 
 /// Attach `Authorization: Bearer {api_key}` when the key is non-empty.
-pub fn authed(req: reqwest::blocking::RequestBuilder, cfg: &Config) -> reqwest::blocking::RequestBuilder {
+pub fn authed(
+    req: reqwest::blocking::RequestBuilder,
+    cfg: &Config,
+) -> reqwest::blocking::RequestBuilder {
     if cfg.embedder.api_key.is_empty() {
         req
     } else {
@@ -109,7 +116,10 @@ fn probe_post(client: &Client, cfg: &Config) -> Result<()> {
         .send()
     {
         Ok(resp) if resp.status().is_success() => Ok(()),
-        Ok(resp) => Err(health_down(cfg, &format!("probe POST -> {}", resp.status()))),
+        Ok(resp) => Err(health_down(
+            cfg,
+            &format!("probe POST -> {}", resp.status()),
+        )),
         Err(e) => Err(health_down(cfg, &e.to_string())),
     }
 }
@@ -139,11 +149,7 @@ fn spawn_managed(cfg: &Config) -> Result<()> {
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .spawn()
-        .map_err(|e| {
-            Error::fatal(format!(
-                "could not spawn managed embedder ({prog}): {e}"
-            ))
-        })?;
+        .map_err(|e| Error::fatal(format!("could not spawn managed embedder ({prog}): {e}")))?;
     // The follow-up health check (with its own timeout) is the readiness
     // wait; no sleep here.
     Ok(())

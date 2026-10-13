@@ -15,7 +15,7 @@ use crate::error::{Error, Result};
 use crate::fingerprint;
 use crate::types::{ChunkKind, FileKind};
 use rusqlite::functions::FunctionFlags;
-use rusqlite::{params, Connection, Transaction};
+use rusqlite::{Connection, Transaction, params};
 use std::fmt;
 use std::path::Path;
 use std::str::FromStr;
@@ -117,7 +117,7 @@ fn register_sqlite_vec() -> Result<()> {
                 *const rusqlite::ffi::sqlite3_api_routines,
             ) -> std::os::raw::c_int,
         >(
-            sqlite_vec::sqlite3_vec_init as *const (),
+            sqlite_vec::sqlite3_vec_init as *const ()
         )))
     });
     if rc != rusqlite::ffi::SQLITE_OK {
@@ -151,7 +151,9 @@ pub fn open(path: &Path, cfg: &Config, images_supported: bool) -> Result<Store> 
     store.apply_pragmas()?;
     store.register_functions()?;
     if new_index {
-        store.conn.execute_batch(&schema::ddl(cfg.embedder.dimensions))?;
+        store
+            .conn
+            .execute_batch(&schema::ddl(cfg.embedder.dimensions))?;
         store.write_initial_meta(cfg, images_supported)?;
     } else {
         store.validate_meta(cfg, path)?;
@@ -173,8 +175,9 @@ impl Store {
     /// WAL, a 5s busy timeout, and enforced foreign keys; also refuses
     /// SQLite older than 3.38.
     fn apply_pragmas(&self) -> Result<()> {
-        let version: String =
-            self.conn.query_row("select sqlite_version()", [], |r| r.get(0))?;
+        let version: String = self
+            .conn
+            .query_row("select sqlite_version()", [], |r| r.get(0))?;
         if !sqlite_at_least(&version, 3, 38) {
             return Err(Error::fatal(format!(
                 "SQLite {version} is too old; ferret requires >= 3.38.0 (rusqlite bundled)"
@@ -230,8 +233,10 @@ impl Store {
             ),
         ];
         for (key, value) in entries {
-            self.conn
-                .execute("INSERT INTO meta (key, value) VALUES (?1, ?2)", params![key, value])?;
+            self.conn.execute(
+                "INSERT INTO meta (key, value) VALUES (?1, ?2)",
+                params![key, value],
+            )?;
         }
         Ok(())
     }
@@ -388,9 +393,9 @@ impl Store {
     /// Chunk id for one file page, if any. Point query for the per-page
     /// scheduler (cheaper than re-scanning `chunk_pages` per page).
     pub fn chunk_id_for_page(&self, file_id: i64, page: i64) -> Result<Option<i64>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT id FROM chunks WHERE file_id = ?1 AND page = ?2 LIMIT 1",
-        )?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id FROM chunks WHERE file_id = ?1 AND page = ?2 LIMIT 1")?;
         let mut rows = stmt.query(rusqlite::params![file_id, page])?;
         Ok(match rows.next()? {
             Some(row) => Some(row.get(0)?),
@@ -412,7 +417,12 @@ impl Store {
 
     /// Delete one page's chunks (vec/fts follow via the sync triggers).
     /// Makes page processing idempotent: reprocessing a page never dupes.
-    pub fn delete_page_chunks(&self, tx: &rusqlite::Transaction<'_>, file_id: i64, page: i64) -> Result<()> {
+    pub fn delete_page_chunks(
+        &self,
+        tx: &rusqlite::Transaction<'_>,
+        file_id: i64,
+        page: i64,
+    ) -> Result<()> {
         tx.execute(
             "DELETE FROM chunks WHERE file_id = ?1 AND page = ?2",
             rusqlite::params![file_id, page],
@@ -555,7 +565,8 @@ impl Store {
             Ok(n as u64)
         };
         let indexed_at_max: Option<i64> =
-            self.conn.query_row("SELECT max(indexed_at) FROM files", [], |r| r.get(0))?;
+            self.conn
+                .query_row("SELECT max(indexed_at) FROM files", [], |r| r.get(0))?;
         Ok(StatusCounts {
             files_text: count("SELECT count(*) FROM files WHERE kind = 'text'")?,
             files_image: count("SELECT count(*) FROM files WHERE kind = 'image'")?,

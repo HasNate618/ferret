@@ -1,0 +1,1393 @@
+95a44a5 feat: add SQLite store with sqlite-vec and FTS5 schema
+
+ Cargo.lock            | 179 +++++++++++++++++-
+ Cargo.toml            |   2 +
+ src/lib.rs            |   1 +
+ src/store/mod.rs      | 510 ++++++++++++++++++++++++++++++++++++++++++++++++++
+ src/store/schema.rs   |  58 ++++++
+ tests/store_schema.rs | 346 ++++++++++++++++++++++++++++++++++
+ 6 files changed, 1095 insertions(+), 1 deletion(-)
+
+diff --git a/Cargo.lock b/Cargo.lock
+index d5291cc..337a51b 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -70,20 +70,26 @@ version = "1.8.7"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "6d9e454fc11f76977dc803893aff6304ed33d6a26efae8696573bea74baa27ae"
+ dependencies = [
+  "arrayvec",
+  "cc",
+  "cfg-if",
+  "constant_time_eq",
+  "cpufeatures",
+ ]
+ 
++[[package]]
++name = "bumpalo"
++version = "3.20.3"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "72f5acc6cb2ba439de613abc23857ec3d78374d8ed5ac84e9d11336e87da8649"
++
+ [[package]]
+ name = "cc"
+ version = "1.8.0"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "6651c9ed80effdc7db0ff72512157f901af5e3549e341e24b1dd4887d836d838"
+ dependencies = [
+  "find-msvc-tools",
+  "shlex",
+ ]
+ 
+@@ -184,47 +190,67 @@ checksum = "877a4ace8713b0bcf2a4e7eec82529c029f1d0619886d18145fea96c3ffe5c0f"
+ [[package]]
+ name = "errno"
+ version = "0.3.14"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
+ dependencies = [
+  "libc",
+  "windows-sys",
+ ]
+ 
++[[package]]
++name = "fallible-iterator"
++version = "0.3.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "2acce4a10f12dc2fb14a218589d4f1f62ef011b2d0cc4b3cb1bba8e94da14649"
++
++[[package]]
++name = "fallible-streaming-iterator"
++version = "0.1.9"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "7360491ce676a36bf9bb3c56c1aa791658183a54d2744120f27285738d90465a"
++
+ [[package]]
+ name = "fastrand"
+ version = "2.5.0"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "da7c62ceae207dd37ea5b845da6a0696c799f85e97da1ab5b7910be3c1c80223"
+ 
+ [[package]]
+ name = "ferret"
+ version = "0.1.0"
+ dependencies = [
+  "blake3",
+  "clap",
+  "dirs",
++ "rusqlite",
+  "serde",
+  "serde_json",
+  "serial_test",
++ "sqlite-vec",
+  "tempfile",
+  "thiserror",
+  "toml",
+ ]
+ 
+ [[package]]
+ name = "find-msvc-tools"
+ version = "0.1.14"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "aedcfb3409746eddb02b9e19ebda1c3394f759a152e48ee875a0844d1b955484"
+ 
++[[package]]
++name = "foldhash"
++version = "0.2.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "77ce24cb58228fbb8aa041425bb1050850ac19177686ea6e0f41a70416f56fdb"
++
+ [[package]]
+ name = "futures-core"
+ version = "0.3.34"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "92d699e522242e69e3003b94ecc1f960f3a5e015aa7c5d7486e65ad01dd94f5e"
+ 
+ [[package]]
+ name = "futures-executor"
+ version = "0.3.34"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+@@ -257,69 +283,111 @@ dependencies = [
+ name = "getrandom"
+ version = "0.4.3"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "300e883d756b2e4ec94e02791f39b04b522276138852cfc41d9fb7e904106099"
+ dependencies = [
+  "cfg-if",
+  "libc",
+  "r-efi",
+ ]
+ 
++[[package]]
++name = "hashbrown"
++version = "0.16.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "841d1cc9bed7f9236f321df977030373f4a4163ae1a7dbfe1a51a2c1a51d9100"
++dependencies = [
++ "foldhash",
++]
++
+ [[package]]
+ name = "hashbrown"
+ version = "0.17.1"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
++dependencies = [
++ "foldhash",
++]
++
++[[package]]
++name = "hashlink"
++version = "0.12.2"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "a596f1b20ed2cc5ecac41a164aaebc7258057060f06c0cf7a2ba3991ee7990fb"
++dependencies = [
++ "hashbrown 0.17.1",
++]
+ 
+ [[package]]
+ name = "heck"
+ version = "0.5.0"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
+ 
+ [[package]]
+ name = "indexmap"
+ version = "2.14.2"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "cc4e190f5d26ca7051642629da2c52fc03bde85a03197c99408dcd291734c855"
+ dependencies = [
+  "equivalent",
+- "hashbrown",
++ "hashbrown 0.17.1",
+ ]
+ 
+ [[package]]
+ name = "is_terminal_polyfill"
+ version = "1.70.2"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "a6cb138bb79a146c1bd460005623e142ef0181e3d0219cb493e02f7d08a35695"
+ 
+ [[package]]
+ name = "itoa"
+ version = "1.0.18"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
+ 
++[[package]]
++name = "js-sys"
++version = "0.3.106"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "7883d941dae510fb2d978fc3fe018c71c9e2892fd38854de3e8b92c2e5ad9cc5"
++dependencies = [
++ "cfg-if",
++ "wasm-bindgen",
++]
++
+ [[package]]
+ name = "libc"
+ version = "0.2.190"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "ce5d3ddc6d3fa000eb1536d85e147bfe31aacaba692ed6a876f95cb7c855be78"
+ 
+ [[package]]
+ name = "libredox"
+ version = "0.1.25"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "61ff90caf6077a803a240f62fdbe88645a890bbca49ef8174c3cb0404362171d"
+ dependencies = [
+  "libc",
+ ]
+ 
++[[package]]
++name = "libsqlite3-sys"
++version = "0.38.2"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "f1d20bef17f513b9b3004532233187769cd072d790971f4e4da0e346eb6401e8"
++dependencies = [
++ "cc",
++ "pkg-config",
++ "vcpkg",
++]
++
+ [[package]]
+ name = "linux-raw-sys"
+ version = "0.12.1"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "32a66949e030da00e8c7d4434b251670a91556f4144941d37452769c25d58a53"
+ 
+ [[package]]
+ name = "lock_api"
+ version = "0.4.14"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+@@ -380,20 +448,26 @@ dependencies = [
+  "smallvec",
+  "windows-link",
+ ]
+ 
+ [[package]]
+ name = "pin-project-lite"
+ version = "0.2.17"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "a89322df9ebe1c1578d689c92318e070967d1042b512afbe49518723f4e6d5cd"
+ 
++[[package]]
++name = "pkg-config"
++version = "0.3.34"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "f6b464fbc74e149a392436b17d523f769e057cb6877f6a5c4618bc6f11800548"
++
+ [[package]]
+ name = "proc-macro2"
+ version = "1.0.107"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "985e7ec9bb745e6ce6535b544d84d6cd6f7ad8bd711c398938ae983b91a766d9"
+ dependencies = [
+  "unicode-ident",
+ ]
+ 
+ [[package]]
+@@ -423,33 +497,64 @@ dependencies = [
+ [[package]]
+ name = "redox_users"
+ version = "0.5.3"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "60dc65c0ff1a7ae1294b0c67b9f14baf70b644404010370171787bfac1038fc0"
+ dependencies = [
+  "libredox",
+  "thiserror",
+ ]
+ 
++[[package]]
++name = "rsqlite-vfs"
++version = "0.1.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "c51c9ae4df8a7fba42103df5c621fa3c37eccf3a3c650879e90fc48b11cc192c"
++dependencies = [
++ "hashbrown 0.16.1",
++ "thiserror",
++]
++
++[[package]]
++name = "rusqlite"
++version = "0.40.2"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "23f2a97da3e3873c73cb2a2e71b35c40ff95e0b1eefa8d72d8499a6928c3b5b3"
++dependencies = [
++ "bitflags",
++ "fallible-iterator",
++ "fallible-streaming-iterator",
++ "hashlink",
++ "libsqlite3-sys",
++ "smallvec",
++ "sqlite-wasm-rs",
++]
++
+ [[package]]
+ name = "rustix"
+ version = "1.1.5"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "891efababe418670775f199f0d233d84843c227a0949a883ce15b37c78d6629d"
+ dependencies = [
+  "bitflags",
+  "errno",
+  "libc",
+  "linux-raw-sys",
+  "windows-sys",
+ ]
+ 
++[[package]]
++name = "rustversion"
++version = "1.0.23"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "cf54715a573b99ac80df0bc206da022bcd442c974952c7b9720069370852e21f"
++
+ [[package]]
+ name = "scopeguard"
+ version = "1.2.0"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
+ 
+ [[package]]
+ name = "serde"
+ version = "1.0.229"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+@@ -537,20 +642,41 @@ name = "slab"
+ version = "0.4.12"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "0c790de23124f9ab44544d7ac05d60440adc586479ce501c1d6d7da3cd8c9cf5"
+ 
+ [[package]]
+ name = "smallvec"
+ version = "1.16.3"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "5b3dc8af474f516a851ff4bd12db780f948b9250ad37211e4eec0bccea54e01b"
+ 
++[[package]]
++name = "sqlite-vec"
++version = "0.1.9"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "d0ba424237a9a5db2f6071f193319e2b6a32f7f3961debb2fbbfe67067abce3f"
++dependencies = [
++ "cc",
++]
++
++[[package]]
++name = "sqlite-wasm-rs"
++version = "0.5.5"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "dc3efc0da82635d7e1ced0053bbbfa8c7ab9645d0bf36ceb4f7127bb85315d75"
++dependencies = [
++ "cc",
++ "js-sys",
++ "rsqlite-vfs",
++ "wasm-bindgen",
++]
++
+ [[package]]
+ name = "strsim"
+ version = "0.11.1"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
+ 
+ [[package]]
+ name = "syn"
+ version = "2.0.119"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+@@ -651,20 +777,71 @@ name = "unicode-ident"
+ version = "1.0.27"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "a2c754d6c33795a1c324727428e5a7dedb5b06195f9890bdbcba760d3e246563"
+ 
+ [[package]]
+ name = "utf8parse"
+ version = "0.2.2"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
+ 
++[[package]]
++name = "vcpkg"
++version = "0.2.15"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "accd4ea62f7bb7a82fe23066fb0957d48ef677f6eeb8215f372f52e48bb32426"
++
++[[package]]
++name = "wasm-bindgen"
++version = "0.2.129"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "9bb54f33acc68fd454578d9820b0bde1a1a3d17aa17bb7b6595806d02886d409"
++dependencies = [
++ "cfg-if",
++ "once_cell",
++ "rustversion",
++ "wasm-bindgen-macro",
++ "wasm-bindgen-shared",
++]
++
++[[package]]
++name = "wasm-bindgen-macro"
++version = "0.2.129"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "2e29d0c35b16e224a7eeb5cd2d25e3e1968fbd65604117b44d3b789d00ee8535"
++dependencies = [
++ "quote",
++ "wasm-bindgen-macro-support",
++]
++
++[[package]]
++name = "wasm-bindgen-macro-support"
++version = "0.2.129"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "6f501a8bc3719dba86ef8ae4728879c08001bea749eb1333ac5b91e040e2a6b7"
++dependencies = [
++ "bumpalo",
++ "proc-macro2",
++ "quote",
++ "syn 3.0.9",
++ "wasm-bindgen-shared",
++]
++
++[[package]]
++name = "wasm-bindgen-shared"
++version = "0.2.129"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "23f0c9c52aa7cd7d77769a4cfe2a9adb1b331f489a41d912ce14513d5ab995c6"
++dependencies = [
++ "unicode-ident",
++]
++
+ [[package]]
+ name = "windows-link"
+ version = "0.2.1"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "f0805222e57f7521d6a62e36fa9163bc891acd422f971defe97d64e70d0a4fe5"
+ 
+ [[package]]
+ name = "windows-sys"
+ version = "0.61.2"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+diff --git a/Cargo.toml b/Cargo.toml
+index 01fb4b2..f638e5e 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -8,14 +8,16 @@ license = "MIT"
+ default-run = "ferret"
+ 
+ [dependencies]
+ thiserror = "2"
+ clap = { version = "4.6", features = ["derive"] }
+ dirs = "6"
+ serde = { version = "1", features = ["derive"] }
+ toml = "0.8"
+ serde_json = "1"
+ blake3 = "1"
++rusqlite = { version = "0.40", features = ["bundled", "functions"] }
++sqlite-vec = "=0.1.9"
+ 
+ [dev-dependencies]
+ tempfile = "3"
+ serial_test = "3"
+diff --git a/src/lib.rs b/src/lib.rs
+index 380045d..af46e81 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -1,6 +1,7 @@
+ pub mod cli;
+ pub mod config;
+ pub mod error;
+ pub mod fingerprint;
+ pub mod paths;
++pub mod store;
+ pub mod types;
+diff --git a/src/store/mod.rs b/src/store/mod.rs
+new file mode 100644
+index 0000000..b35f824
+--- /dev/null
++++ b/src/store/mod.rs
+@@ -0,0 +1,510 @@
++//! SQLite store: schema creation, index-meta validation, and CRUD.
++//!
++//! sqlite-vec is registered in-process before any connection opens (no
++//! runtime `.so` load); registration failure is fatal. Opening an index
++//! whose `model_id`, `dimensions`, or `prefix_profile` differ from the
++//! merged config is fatal — the user must pass a new `--index` or delete the
++//! index file. A `backend`-only difference is a stderr warning, not an
++//! error. There is deliberately no method that rewrites meta (`ferret rm`
++//! must not change it).
++
++mod schema;
++
++use crate::config::Config;
++use crate::error::{Error, Result};
++use crate::fingerprint;
++use crate::types::{ChunkKind, FileKind};
++use rusqlite::functions::FunctionFlags;
++use rusqlite::{params, Connection, Transaction};
++use std::fmt;
++use std::path::Path;
++use std::str::FromStr;
++use std::sync::OnceLock;
++use std::time::Duration;
++
++/// An open ferret index. `dimensions` is the vec0 embedding width the index
++/// was created with (from the merged config at open time).
++pub struct Store {
++    conn: Connection,
++    pub dimensions: u32,
++}
++
++impl fmt::Debug for Store {
++    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        f.debug_struct("Store")
++            .field("dimensions", &self.dimensions)
++            .finish_non_exhaustive()
++    }
++}
++
++/// New `files` row for `Store::upsert_file`.
++#[derive(Debug, Clone)]
++pub struct NewFile {
++    pub path: String,
++    pub collection: String,
++    pub kind: FileKind,
++    pub ext: String,
++    pub size: u64,
++    pub mtime: i64,
++    pub fingerprint: String,
++    pub complete: bool,
++    pub next_page: Option<i64>,
++    pub skip_reason: Option<String>,
++    pub indexed_at: i64,
++    pub error: Option<String>,
++}
++
++/// A `files` row as stored.
++#[derive(Debug, Clone)]
++pub struct FileRow {
++    pub id: i64,
++    pub path: String,
++    pub collection: String,
++    pub kind: FileKind,
++    pub ext: String,
++    pub size: u64,
++    pub mtime: i64,
++    pub fingerprint: String,
++    pub complete: bool,
++    pub next_page: Option<i64>,
++    pub skip_reason: Option<String>,
++    pub indexed_at: i64,
++    pub error: Option<String>,
++}
++
++/// New `chunks` row for `Store::insert_chunk`. Empty text is stored as SQL
++/// NULL.
++#[derive(Debug, Clone)]
++pub struct NewChunk {
++    pub file_id: i64,
++    pub ordinal: i64,
++    pub page: Option<i64>,
++    pub kind: ChunkKind,
++    pub text: Option<String>,
++    pub start_byte: Option<i64>,
++    pub end_byte: Option<i64>,
++}
++
++/// Counts for `ferret status`.
++#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
++pub struct StatusCounts {
++    pub files_text: u64,
++    pub files_image: u64,
++    pub files_pdf: u64,
++    pub chunks: u64,
++    pub incomplete: u64,
++    pub errors: u64,
++    pub indexed_at_max: Option<i64>,
++}
++
++impl From<rusqlite::Error> for Error {
++    fn from(e: rusqlite::Error) -> Self {
++        Error::fatal(e.to_string())
++    }
++}
++
++/// Cache of the `sqlite3_auto_extension` return code so the C extension is
++/// registered exactly once per process, before the first connection opens.
++static SQLITE_VEC_REGISTRATION: OnceLock<i32> = OnceLock::new();
++
++fn register_sqlite_vec() -> Result<()> {
++    let rc = *SQLITE_VEC_REGISTRATION.get_or_init(|| unsafe {
++        rusqlite::ffi::sqlite3_auto_extension(Some(std::mem::transmute::<
++            *const (),
++            unsafe extern "C" fn(
++                *mut rusqlite::ffi::sqlite3,
++                *mut *mut std::os::raw::c_char,
++                *const rusqlite::ffi::sqlite3_api_routines,
++            ) -> std::os::raw::c_int,
++        >(
++            sqlite_vec::sqlite3_vec_init as *const (),
++        )))
++    });
++    if rc != rusqlite::ffi::SQLITE_OK {
++        return Err(Error::fatal(format!(
++            "failed to register sqlite-vec in-process (sqlite3_auto_extension rc = {rc}); \
++             the sqlite-vec C extension did not build or link"
++        )));
++    }
++    Ok(())
++}
++
++/// Open (creating if absent) the index at `path` and validate its meta
++/// against the merged config.
++pub fn open(path: &Path, cfg: &Config, images_supported: bool) -> Result<Store> {
++    register_sqlite_vec()?;
++    let new_index = !path.exists();
++    let conn = Connection::open(path)?;
++    let store = Store {
++        conn,
++        dimensions: cfg.embedder.dimensions,
++    };
++    store.apply_pragmas()?;
++    store.register_functions()?;
++    if new_index {
++        store.conn.execute_batch(&schema::ddl(cfg.embedder.dimensions))?;
++        store.write_initial_meta(cfg, images_supported)?;
++    } else {
++        store.validate_meta(cfg, path)?;
++    }
++    Ok(store)
++}
++
++impl Store {
++    /// Read-only connection handle for tests and read-only CLI output; all
++    /// writes go through the methods above.
++    pub fn conn(&self) -> &Connection {
++        &self.conn
++    }
++
++    /// WAL, a 5s busy timeout, and enforced foreign keys; also refuses
++    /// SQLite older than 3.38.
++    fn apply_pragmas(&self) -> Result<()> {
++        let version: String =
++            self.conn.query_row("select sqlite_version()", [], |r| r.get(0))?;
++        if !sqlite_at_least(&version, 3, 38) {
++            return Err(Error::fatal(format!(
++                "SQLite {version} is too old; ferret requires >= 3.38.0 (rusqlite bundled)"
++            )));
++        }
++        let mode: String = self
++            .conn
++            .pragma_update_and_check(None, "journal_mode", "WAL", |r| r.get(0))?;
++        if !mode.eq_ignore_ascii_case("wal") {
++            return Err(Error::fatal(format!(
++                "could not enable WAL journal mode (got `{mode}`)"
++            )));
++        }
++        self.conn.busy_timeout(Duration::from_millis(5000))?;
++        self.conn.pragma_update(None, "foreign_keys", "ON")?;
++        Ok(())
++    }
++
++    /// Per-connection scalar functions. `ferret_basename(path)` feeds the
++    /// `chunks_fts` filename column from the triggers added with indexing.
++    fn register_functions(&self) -> Result<()> {
++        self.conn.create_scalar_function(
++            "ferret_basename",
++            1,
++            FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC,
++            |ctx| {
++                let path: String = ctx.get(0)?;
++                Ok(path.rsplit('/').next().unwrap_or("").to_string())
++            },
++        )?;
++        Ok(())
++    }
++
++    fn write_initial_meta(&self, cfg: &Config, images_supported: bool) -> Result<()> {
++        let entries: [(&str, String); 9] = [
++            ("schema_version", "1".to_string()),
++            ("model_id", cfg.embedder.model.clone()),
++            ("dimensions", cfg.embedder.dimensions.to_string()),
++            ("backend", cfg.embedder.backend.to_string()),
++            ("prefix_profile", cfg.embedder.prefix_profile.to_string()),
++            (
++                "images_supported",
++                if images_supported { "true" } else { "false" }.to_string(),
++            ),
++            (
++                "config_fingerprint",
++                fingerprint::config_fingerprint(cfg, images_supported),
++            ),
++            ("text_pipeline", fingerprint::text_pipeline_json(cfg)),
++            (
++                "image_pipeline",
++                fingerprint::image_pipeline_json(cfg, images_supported),
++            ),
++        ];
++        for (key, value) in entries {
++            self.conn
++                .execute("INSERT INTO meta (key, value) VALUES (?1, ?2)", params![key, value])?;
++        }
++        Ok(())
++    }
++
++    /// Hard errors on `model_id`, `dimensions`, or `prefix_profile`
++    /// mismatch; warns on a `backend`-only mismatch.
++    fn validate_meta(&self, cfg: &Config, path: &Path) -> Result<()> {
++        let has_meta: bool = self.conn.query_row(
++            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'meta')",
++            [],
++            |r| r.get(0),
++        )?;
++        if !has_meta {
++            return Err(Error::fatal(format!(
++                "{} is not a ferret index (no meta table); pass a new --index path or delete the file",
++                path.display()
++            )));
++        }
++
++        let expected = [
++            ("model_id", cfg.embedder.model.clone()),
++            ("dimensions", cfg.embedder.dimensions.to_string()),
++            ("prefix_profile", cfg.embedder.prefix_profile.to_string()),
++        ];
++        for (key, want) in expected {
++            let found = self.get_meta(key)?;
++            if found.as_deref() != Some(want.as_str()) {
++                return Err(meta_mismatch(path, key, found.as_deref(), &want));
++            }
++        }
++
++        let backend = self.get_meta("backend")?;
++        let want_backend = cfg.embedder.backend.to_string();
++        if backend.as_deref() != Some(want_backend.as_str()) {
++            eprintln!(
++                "warning: index backend is `{}` but config backend is `{want_backend}`; \
++                 model, dimensions, and prefix profile match, so continuing",
++                backend.as_deref().unwrap_or("<missing>"),
++            );
++        }
++        Ok(())
++    }
++
++    pub fn get_meta(&self, key: &str) -> Result<Option<String>> {
++        let mut stmt = self.conn.prepare("SELECT value FROM meta WHERE key = ?1")?;
++        let mut rows = stmt.query([key])?;
++        Ok(match rows.next()? {
++            Some(row) => Some(row.get(0)?),
++            None => None,
++        })
++    }
++
++    pub fn upsert_file(&self, row: &NewFile) -> Result<i64> {
++        let id: i64 = self.conn.query_row(
++            "INSERT INTO files (path, collection, kind, ext, size, mtime, fingerprint, \
++             complete, next_page, skip_reason, indexed_at, error)
++             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
++             ON CONFLICT (path) DO UPDATE SET
++               collection = excluded.collection,
++               kind = excluded.kind,
++               ext = excluded.ext,
++               size = excluded.size,
++               mtime = excluded.mtime,
++               fingerprint = excluded.fingerprint,
++               complete = excluded.complete,
++               next_page = excluded.next_page,
++               skip_reason = excluded.skip_reason,
++               indexed_at = excluded.indexed_at,
++               error = excluded.error
++             RETURNING id",
++            params![
++                row.path,
++                row.collection,
++                row.kind.to_string(),
++                row.ext,
++                row.size as i64,
++                row.mtime,
++                row.fingerprint,
++                row.complete as i64,
++                row.next_page,
++                row.skip_reason,
++                row.indexed_at,
++                row.error,
++            ],
++            |r| r.get(0),
++        )?;
++        Ok(id)
++    }
++
++    pub fn get_file_by_path(&self, path: &str) -> Result<Option<FileRow>> {
++        let mut stmt = self.conn.prepare(
++            "SELECT id, path, collection, kind, ext, size, mtime, fingerprint, complete, \
++             next_page, skip_reason, indexed_at, error
++             FROM files WHERE path = ?1",
++        )?;
++        let mut rows = stmt.query([path])?;
++        Ok(match rows.next()? {
++            Some(row) => Some(file_row(row)?),
++            None => None,
++        })
++    }
++
++    pub fn delete_file_by_path(&self, path: &str) -> Result<bool> {
++        // chunks_vec and chunks_fts are keyed by chunks.id and have no
++        // foreign keys, so clean them before the files delete cascades.
++        for table in ["chunks_vec", "chunks_fts"] {
++            self.conn.execute(
++                &format!(
++                    "DELETE FROM {table} WHERE rowid IN \
++                     (SELECT c.id FROM chunks c JOIN files f ON f.id = c.file_id \
++                      WHERE f.path = ?1)"
++                ),
++                [path],
++            )?;
++        }
++        let deleted = self
++            .conn
++            .execute("DELETE FROM files WHERE path = ?1", [path])?;
++        Ok(deleted > 0)
++    }
++
++    pub fn insert_chunk(&self, tx: &Transaction<'_>, chunk: NewChunk) -> Result<i64> {
++        // Empty text is stored as SQL NULL.
++        let text = chunk.text.as_deref().filter(|t| !t.is_empty());
++        tx.execute(
++            "INSERT INTO chunks (file_id, ordinal, page, kind, text, start_byte, end_byte)
++             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
++            params![
++                chunk.file_id,
++                chunk.ordinal,
++                chunk.page,
++                chunk.kind.to_string(),
++                text,
++                chunk.start_byte,
++                chunk.end_byte,
++            ],
++        )?;
++        Ok(tx.last_insert_rowid())
++    }
++
++    /// Insert one embedding; `rowid` is the `chunks.id` and `file_kind` is
++    /// the FILES kind (text|image|pdf), never the chunk kind.
++    #[allow(clippy::too_many_arguments)] // signature fixed by the task brief
++    pub fn insert_vec(
++        &self,
++        tx: &Transaction<'_>,
++        chunk_id: i64,
++        embedding: &[f32],
++        file_kind: FileKind,
++        ext: &str,
++        mtime: i64,
++        collection: &str,
++    ) -> Result<()> {
++        // Global constraint: store only finite f32.
++        if let Some(pos) = embedding.iter().position(|f| !f.is_finite()) {
++            return Err(Error::fatal(format!(
++                "refusing to store non-finite embedding value at index {pos} \
++                 for chunk {chunk_id}"
++            )));
++        }
++        if embedding.len() as u32 != self.dimensions {
++            return Err(Error::fatal(format!(
++                "embedding length {} does not match index dimensions {}",
++                embedding.len(),
++                self.dimensions
++            )));
++        }
++        tx.execute(
++            "INSERT INTO chunks_vec (rowid, embedding, file_kind, ext, mtime, collection)
++             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
++            params![
++                chunk_id,
++                f32_blob(embedding),
++                file_kind.to_string(),
++                ext,
++                mtime,
++                collection,
++            ],
++        )?;
++        Ok(())
++    }
++
++    /// Delete a file's `text` chunks (keeping `image` and `pdf_page`).
++    pub fn delete_text_chunks_keep_images(&self, file_id: i64) -> Result<()> {
++        self.delete_chunks_where(file_id, "kind = 'text'")
++    }
++
++    /// Delete a file's `image` and `pdf_page` chunks (keeping `text`).
++    pub fn delete_image_chunks_keep_text(&self, file_id: i64) -> Result<()> {
++        self.delete_chunks_where(file_id, "kind IN ('image', 'pdf_page')")
++    }
++
++    /// `kind_filter` is always a compile-time literal, never user input.
++    fn delete_chunks_where(&self, file_id: i64, kind_filter: &str) -> Result<()> {
++        for table in ["chunks_vec", "chunks_fts"] {
++            self.conn.execute(
++                &format!(
++                    "DELETE FROM {table} WHERE rowid IN \
++                     (SELECT id FROM chunks WHERE file_id = ?1 AND {kind_filter})"
++                ),
++                [file_id],
++            )?;
++        }
++        self.conn.execute(
++            &format!("DELETE FROM chunks WHERE file_id = ?1 AND {kind_filter}"),
++            [file_id],
++        )?;
++        Ok(())
++    }
++
++    pub fn status_counts(&self) -> Result<StatusCounts> {
++        let count = |sql: &str| -> Result<u64> {
++            let n: i64 = self.conn.query_row(sql, [], |r| r.get(0))?;
++            Ok(n as u64)
++        };
++        let indexed_at_max: Option<i64> =
++            self.conn.query_row("SELECT max(indexed_at) FROM files", [], |r| r.get(0))?;
++        Ok(StatusCounts {
++            files_text: count("SELECT count(*) FROM files WHERE kind = 'text'")?,
++            files_image: count("SELECT count(*) FROM files WHERE kind = 'image'")?,
++            files_pdf: count("SELECT count(*) FROM files WHERE kind = 'pdf'")?,
++            chunks: count("SELECT count(*) FROM chunks")?,
++            incomplete: count("SELECT count(*) FROM files WHERE complete = 0")?,
++            errors: count("SELECT count(*) FROM files WHERE error IS NOT NULL")?,
++            indexed_at_max,
++        })
++    }
++
++    /// `&self`, not `&mut self`: callers keep using the store's `&self`
++    /// methods (`upsert_file`, `insert_chunk`, `insert_vec`) while the
++    /// transaction is open, so an exclusive borrow here would not compile
++    /// at those call sites. `new_unchecked` trades the compile-time
++    /// no-nesting guarantee for a runtime one (BEGIN fails if a transaction
++    /// is already open on this connection).
++    pub fn begin(&self) -> Result<Transaction<'_>> {
++        Ok(Transaction::new_unchecked(
++            &self.conn,
++            rusqlite::TransactionBehavior::Deferred,
++        )?)
++    }
++}
++
++fn file_row(row: &rusqlite::Row<'_>) -> Result<FileRow> {
++    let kind: String = row.get("kind")?;
++    Ok(FileRow {
++        id: row.get("id")?,
++        path: row.get("path")?,
++        collection: row.get("collection")?,
++        kind: FileKind::from_str(&kind).map_err(Error::fatal)?,
++        ext: row.get("ext")?,
++        size: row.get::<_, i64>("size")? as u64,
++        mtime: row.get("mtime")?,
++        fingerprint: row.get("fingerprint")?,
++        complete: row.get::<_, i64>("complete")? != 0,
++        next_page: row.get("next_page")?,
++        skip_reason: row.get("skip_reason")?,
++        indexed_at: row.get("indexed_at")?,
++        error: row.get("error")?,
++    })
++}
++
++/// `"3.38.0"`-style version at or above `major.minor`.
++fn sqlite_at_least(version: &str, want_major: u32, want_minor: u32) -> bool {
++    let mut parts = version.split('.');
++    let major: u32 = parts.next().unwrap_or("0").parse().unwrap_or(0);
++    let minor: u32 = parts.next().unwrap_or("0").parse().unwrap_or(0);
++    (major, minor) >= (want_major, want_minor)
++}
++
++/// The hard-error message for a model/dimensions/prefix_profile mismatch.
++fn meta_mismatch(path: &Path, key: &str, found: Option<&str>, expected: &str) -> Error {
++    Error::fatal(format!(
++        "index {} mismatch: this index was built with `{}` but the merged config has \
++         `{expected}`; pass a new --index path or delete the index file {} to rebuild",
++        key,
++        found.unwrap_or("<missing>"),
++        path.display()
++    ))
++}
++
++/// sqlite-vec reads `FLOAT[d]` blobs as a C `float` array, so the byte order
++/// is the platform's native order.
++fn f32_blob(values: &[f32]) -> Vec<u8> {
++    let mut bytes = Vec::with_capacity(values.len() * 4);
++    for value in values {
++        bytes.extend_from_slice(&value.to_ne_bytes());
++    }
++    bytes
++}
+diff --git a/src/store/schema.rs b/src/store/schema.rs
+new file mode 100644
+index 0000000..91eee37
+--- /dev/null
++++ b/src/store/schema.rs
+@@ -0,0 +1,58 @@
++//! Index schema DDL (spec §5.1).
++//!
++//! `dimensions` is interpolated only into the vec0 embedding width
++//! (`FLOAT[{d}]`); no path or other user input is ever concatenated into
++//! this SQL.
++//!
++//! The `chunks_fts` triggers (after insert/update/delete on `chunks`, and a
++//! rewrite when `files.path` changes) land with indexing, not here; they use
++//! the `ferret_basename(path)` scalar function that `store::open` registers
++//! on every connection.
++
++/// Complete DDL for a new index: `meta`, `files`, `chunks`, the FTS5 index
++/// over chunk text + filename + path, and the `vec0` vector table whose
++/// `rowid` mirrors `chunks.id`. Its `file_kind` metadata column is the
++/// `files.kind` (text|image|pdf), never the chunk kind.
++pub fn ddl(dimensions: u32) -> String {
++    let d = dimensions;
++    format!(
++        r#"
++CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
++CREATE TABLE files (
++  id INTEGER PRIMARY KEY,
++  path TEXT NOT NULL UNIQUE,
++  collection TEXT NOT NULL,
++  kind TEXT NOT NULL,
++  ext TEXT NOT NULL,
++  size INTEGER NOT NULL,
++  mtime INTEGER NOT NULL,
++  fingerprint TEXT NOT NULL,
++  complete INTEGER NOT NULL,
++  next_page INTEGER,
++  skip_reason TEXT,
++  indexed_at INTEGER NOT NULL,
++  error TEXT
++);
++CREATE TABLE chunks (
++  id INTEGER PRIMARY KEY,
++  file_id INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,
++  ordinal INTEGER NOT NULL,
++  page INTEGER,
++  kind TEXT NOT NULL,
++  text TEXT,
++  start_byte INTEGER,
++  end_byte INTEGER
++);
++CREATE VIRTUAL TABLE chunks_fts USING fts5(
++  text, filename, path, tokenize='unicode61'
++);
++CREATE VIRTUAL TABLE chunks_vec USING vec0(
++  embedding FLOAT[{d}],
++  file_kind TEXT,
++  ext TEXT,
++  mtime INTEGER,
++  collection TEXT
++);
++"#
++    )
++}
+diff --git a/tests/store_schema.rs b/tests/store_schema.rs
+new file mode 100644
+index 0000000..c315fce
+--- /dev/null
++++ b/tests/store_schema.rs
+@@ -0,0 +1,346 @@
++//! Task 5: store schema, meta validation, and CRUD.
++
++mod common;
++
++use ferret::config::{compiled_defaults, Config};
++use ferret::store::{self, NewChunk, NewFile, Store};
++use ferret::types::{Backend, ChunkKind, FileKind, PrefixProfile};
++use std::cell::RefCell;
++use std::path::PathBuf;
++
++thread_local! {
++    /// Keeps the per-test tempdirs (and their index files) alive until the
++    /// test thread ends; the store only borrows the paths.
++    static KEEP: RefCell<Vec<tempfile::TempDir>> = const { RefCell::new(Vec::new()) };
++}
++
++fn tmp_index() -> PathBuf {
++    let dir = tempfile::tempdir().unwrap();
++    let path = dir.path().join("index.sqlite");
++    KEEP.with(|k| k.borrow_mut().push(dir));
++    path
++}
++
++fn cfg_with_dims(dims: u32) -> Config {
++    let mut cfg = compiled_defaults(&common::test_dirs(std::path::Path::new("/ferret-t")));
++    cfg.embedder.dimensions = dims;
++    cfg
++}
++
++fn open_temp(dims: u32) -> Store {
++    let path = tmp_index();
++    let cfg = cfg_with_dims(dims);
++    store::open(&path, &cfg, true).unwrap()
++}
++
++fn file(path: &str, kind: FileKind) -> NewFile {
++    let ext = match kind {
++        FileKind::Text => "txt",
++        FileKind::Image => "png",
++        FileKind::Pdf => "pdf",
++    };
++    NewFile {
++        path: path.into(),
++        collection: "Documents".into(),
++        kind,
++        ext: ext.into(),
++        size: 1,
++        mtime: 1,
++        fingerprint: "x".into(),
++        complete: true,
++        next_page: None,
++        skip_reason: None,
++        indexed_at: 1,
++        error: None,
++    }
++}
++
++fn chunk(file_id: i64, ordinal: i64, kind: ChunkKind, text: Option<&str>) -> NewChunk {
++    NewChunk {
++        file_id,
++        ordinal,
++        page: None,
++        kind,
++        text: text.map(String::from),
++        start_byte: None,
++        end_byte: None,
++    }
++}
++
++#[test]
++fn opens_and_registers_vec() {
++    let store = open_temp(768);
++    let v: String = store
++        .conn()
++        .query_row("select vec_version()", [], |r| r.get(0))
++        .unwrap();
++    assert!(v.starts_with('v'));
++}
++
++#[test]
++fn sqlite_version_is_at_least_3_38() {
++    let store = open_temp(8);
++    let v: String = store
++        .conn()
++        .query_row("select sqlite_version()", [], |r| r.get(0))
++        .unwrap();
++    let parts: Vec<u32> = v.split('.').map(|p| p.parse().unwrap()).collect();
++    assert!((parts[0], parts[1]) >= (3, 38), "sqlite_version() = {v}");
++}
++
++#[test]
++fn journal_mode_is_wal() {
++    let store = open_temp(8);
++    let mode: String = store
++        .conn()
++        .query_row("pragma journal_mode", [], |r| r.get(0))
++        .unwrap();
++    assert_eq!(mode.to_lowercase(), "wal");
++}
++
++#[test]
++fn model_mismatch_is_fatal() {
++    let path = tmp_index();
++    let cfg768 = cfg_with_dims(768);
++    store::open(&path, &cfg768, true).unwrap();
++    let cfg256 = cfg_with_dims(256);
++    let err = store::open(&path, &cfg256, true).unwrap_err();
++    assert_eq!(err.exit_code(), 1);
++}
++
++#[test]
++fn prefix_profile_mismatch_is_fatal() {
++    let path = tmp_index();
++    let mut cfg = cfg_with_dims(768);
++    store::open(&path, &cfg, true).unwrap();
++    cfg.embedder.prefix_profile = PrefixProfile::LitertLm;
++    let err = store::open(&path, &cfg, true).unwrap_err();
++    assert_eq!(err.exit_code(), 1);
++}
++
++#[test]
++fn model_id_mismatch_is_fatal() {
++    let path = tmp_index();
++    let mut cfg = cfg_with_dims(768);
++    store::open(&path, &cfg, true).unwrap();
++    cfg.embedder.model = "other-model".into();
++    let err = store::open(&path, &cfg, true).unwrap_err();
++    assert_eq!(err.exit_code(), 1);
++    assert!(err.to_string().contains("model_id"), "{}", err);
++    assert!(err.to_string().contains("--index"), "{}", err);
++}
++
++#[test]
++fn backend_only_change_is_a_warning_not_an_error() {
++    let path = tmp_index();
++    let cfg = cfg_with_dims(768);
++    store::open(&path, &cfg, true).unwrap();
++    let mut other = cfg_with_dims(768);
++    other.embedder.backend = Backend::Sglang;
++    // Must open fine: model_id, dimensions, and prefix_profile all match.
++    store::open(&path, &other, true).unwrap();
++}
++
++#[test]
++fn new_index_writes_initial_meta() {
++    let store = open_temp(768);
++    assert_eq!(store.get_meta("schema_version").unwrap().as_deref(), Some("1"));
++    assert_eq!(store.get_meta("model_id").unwrap().as_deref(), Some("embeddinggemma-2"));
++    assert_eq!(store.get_meta("dimensions").unwrap().as_deref(), Some("768"));
++    assert_eq!(store.get_meta("prefix_profile").unwrap().as_deref(), Some("embeddinggemma2"));
++    assert_eq!(store.get_meta("backend").unwrap().as_deref(), Some("llama_server"));
++    for key in ["images_supported", "config_fingerprint", "text_pipeline", "image_pipeline"] {
++        assert!(store.get_meta(key).unwrap().is_some(), "meta key {key} missing");
++    }
++    assert_eq!(store.get_meta("nope").unwrap(), None);
++}
++
++#[test]
++fn file_kind_metadata_is_files_kind_not_chunk_kind() {
++    let store = open_temp(8);
++    let tx = store.begin().unwrap();
++    let fid = store.upsert_file(&NewFile {
++        path: "/a/lease.pdf".into(), collection: "Documents".into(),
++        kind: FileKind::Pdf, ext: "pdf".into(), size: 1, mtime: 1,
++        fingerprint: "x".into(), complete: true, next_page: Some(3),
++        skip_reason: None, indexed_at: 1, error: None,
++    }).unwrap();
++    let cid = store.insert_chunk(&tx, NewChunk {
++        file_id: fid, ordinal: 0, page: Some(1), kind: ChunkKind::PdfPage,
++        text: Some("pets".into()), start_byte: None, end_byte: None,
++    }).unwrap();
++    let mut v = vec![0.0_f32; 8];
++    v[0] = 1.0;
++    store.insert_vec(&tx, cid, &v, FileKind::Pdf, "pdf", 1, "Documents").unwrap();
++    tx.commit().unwrap();
++    let kind: String = store.conn().query_row(
++        "select file_kind from chunks_vec where rowid = ?",
++        [cid],
++        |r| r.get(0),
++    ).unwrap();
++    assert_eq!(kind, "pdf");
++}
++
++#[test]
++fn empty_text_is_stored_as_null() {
++    let store = open_temp(8);
++    let fid = store.upsert_file(&file("/a/empty.txt", FileKind::Text)).unwrap();
++    let tx = store.begin().unwrap();
++    let cid = store.insert_chunk(&tx, chunk(fid, 0, ChunkKind::Text, Some(""))).unwrap();
++    tx.commit().unwrap();
++    let text: Option<String> = store
++        .conn()
++        .query_row("select text from chunks where id = ?", [cid], |r| r.get(0))
++        .unwrap();
++    assert_eq!(text, None);
++}
++
++#[test]
++fn upsert_file_roundtrip_and_delete() {
++    let store = open_temp(8);
++    let mut row = file("/a/lease.pdf", FileKind::Pdf);
++    row.next_page = Some(3);
++    let id = store.upsert_file(&row).unwrap();
++    let got = store.get_file_by_path("/a/lease.pdf").unwrap().unwrap();
++    assert_eq!(got.id, id);
++    assert_eq!(got.kind, FileKind::Pdf);
++    assert_eq!(got.ext, "pdf");
++    assert!(got.complete);
++    assert_eq!(got.next_page, Some(3));
++
++    // Upsert on the same path updates in place and keeps the id.
++    let mut updated = row;
++    updated.size = 9;
++    updated.complete = false;
++    updated.error = Some("boom".into());
++    let id2 = store.upsert_file(&updated).unwrap();
++    assert_eq!(id2, id);
++    let got2 = store.get_file_by_path("/a/lease.pdf").unwrap().unwrap();
++    assert_eq!(got2.size, 9);
++    assert!(!got2.complete);
++    assert_eq!(got2.error.as_deref(), Some("boom"));
++
++    assert!(store.delete_file_by_path("/a/lease.pdf").unwrap());
++    assert!(store.get_file_by_path("/a/lease.pdf").unwrap().is_none());
++    assert!(!store.delete_file_by_path("/a/lease.pdf").unwrap());
++}
++
++#[test]
++fn delete_file_cascades_chunks_and_vec_rows() {
++    let store = open_temp(8);
++    let fid = store.upsert_file(&file("/a/one.txt", FileKind::Text)).unwrap();
++    let tx = store.begin().unwrap();
++    let cid = store.insert_chunk(&tx, chunk(fid, 0, ChunkKind::Text, Some("hello"))).unwrap();
++    store
++        .insert_vec(&tx, cid, &[1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], FileKind::Text, "txt", 1, "Documents")
++        .unwrap();
++    tx.commit().unwrap();
++
++    assert!(store.delete_file_by_path("/a/one.txt").unwrap());
++    let counts: (i64, i64) = store
++        .conn()
++        .query_row("select (select count(*) from chunks), (select count(*) from chunks_vec)", [], |r| {
++            Ok((r.get(0)?, r.get(1)?))
++        })
++        .unwrap();
++    assert_eq!(counts, (0, 0));
++}
++
++#[test]
++fn delete_chunk_kind_sides_keep_the_other_side() {
++    let store = open_temp(8);
++    // Text file: only a 'text' chunk. PDF: 'pdf_page' + 'image' chunks.
++    let fid_text = store.upsert_file(&file("/a/t.txt", FileKind::Text)).unwrap();
++    let fid_pdf = store.upsert_file(&file("/a/mix.pdf", FileKind::Pdf)).unwrap();
++    let tx = store.begin().unwrap();
++    let c_text = store.insert_chunk(&tx, chunk(fid_text, 0, ChunkKind::Text, Some("body"))).unwrap();
++    let c_page = store.insert_chunk(&tx, NewChunk {
++        file_id: fid_pdf, ordinal: 0, page: Some(1), kind: ChunkKind::PdfPage,
++        text: Some("page".into()), start_byte: None, end_byte: None,
++    }).unwrap();
++    let c_img = store.insert_chunk(&tx, chunk(fid_pdf, 1, ChunkKind::Image, None)).unwrap();
++    for cid in [c_text, c_page, c_img] {
++        store.insert_vec(&tx, cid, &[0.5; 8], FileKind::Text, "txt", 1, "Documents").unwrap();
++    }
++    tx.commit().unwrap();
++
++    // Text side: delete 'text' chunks, keep 'image' + 'pdf_page'.
++    store.delete_text_chunks_keep_images(fid_pdf).unwrap();
++    let pdf_kinds: Vec<String> = store
++        .conn()
++        .prepare("select kind from chunks where file_id = ? order by id")
++        .unwrap()
++        .query_map([fid_pdf], |r| r.get(0))
++        .unwrap()
++        .collect::<rusqlite::Result<_>>()
++        .unwrap();
++    assert_eq!(pdf_kinds, vec!["pdf_page".to_string(), "image".to_string()]);
++    let text_file_chunks: i64 = store
++        .conn()
++        .query_row("select count(*) from chunks where file_id = ?", [fid_text], |r| r.get(0))
++        .unwrap();
++    assert_eq!(text_file_chunks, 1);
++
++    // Image side: delete 'image' + 'pdf_page' chunks, keep 'text'.
++    store.delete_image_chunks_keep_text(fid_pdf).unwrap();
++    let pdf_left: i64 = store
++        .conn()
++        .query_row("select count(*) from chunks where file_id = ?", [fid_pdf], |r| r.get(0))
++        .unwrap();
++    assert_eq!(pdf_left, 0);
++    store.delete_image_chunks_keep_text(fid_text).unwrap();
++    let text_left: i64 = store
++        .conn()
++        .query_row("select count(*) from chunks where file_id = ?", [fid_text], |r| r.get(0))
++        .unwrap();
++    assert_eq!(text_left, 1);
++    // Vector rows follow their chunks.
++    let vec_rows: i64 = store
++        .conn()
++        .query_row("select count(*) from chunks_vec", [], |r| r.get(0))
++        .unwrap();
++    assert_eq!(vec_rows, 1);
++}
++
++#[test]
++fn status_counts_reflects_rows() {
++    let store = open_temp(8);
++    let c0 = store.status_counts().unwrap();
++    assert_eq!((c0.files_text, c0.files_image, c0.files_pdf, c0.chunks, c0.incomplete, c0.errors), (0, 0, 0, 0, 0, 0));
++    assert_eq!(c0.indexed_at_max, None);
++
++    let mut t = file("/a/t.txt", FileKind::Text);
++    t.indexed_at = 5;
++    store.upsert_file(&t).unwrap();
++    let mut p = file("/a/p.pdf", FileKind::Pdf);
++    p.complete = false;
++    p.error = Some("boom".into());
++    p.indexed_at = 7;
++    store.upsert_file(&p).unwrap();
++    store.upsert_file(&file("/a/i.png", FileKind::Image)).unwrap();
++    let c1 = store.status_counts().unwrap();
++    assert_eq!((c1.files_text, c1.files_image, c1.files_pdf), (1, 1, 1));
++    assert_eq!(c1.incomplete, 1);
++    assert_eq!(c1.errors, 1);
++    assert_eq!(c1.indexed_at_max, Some(7));
++    assert_eq!(c1.chunks, 0);
++
++    let fid = store.get_file_by_path("/a/t.txt").unwrap().unwrap().id;
++    let tx = store.begin().unwrap();
++    store.insert_chunk(&tx, chunk(fid, 0, ChunkKind::Text, Some("x"))).unwrap();
++    tx.commit().unwrap();
++    let c2 = store.status_counts().unwrap();
++    assert_eq!(c2.chunks, 1);
++}
++
++#[test]
++fn non_ferret_sqlite_file_is_fatal() {
++    let dir = tempfile::tempdir().unwrap();
++    let path = dir.path().join("index.sqlite");
++    let foreign = rusqlite::Connection::open(&path).unwrap();
++    foreign.execute("CREATE TABLE other(x)", []).unwrap();
++    drop(foreign);
++    let err = store::open(&path, &cfg_with_dims(768), true).unwrap_err();
++    assert_eq!(err.exit_code(), 1);
++    assert!(err.to_string().contains("meta"), "{}", err);
++}

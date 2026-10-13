@@ -4,7 +4,7 @@
 
 mod common;
 
-use ferret::config::{compiled_defaults, Config};
+use ferret::config::{Config, compiled_defaults};
 use ferret::embedder::{EmbedInput, Embedder, HttpEmbedder};
 use ferret::types::{Backend, QueryTask};
 
@@ -26,11 +26,13 @@ fn doc_input(text: &str) -> EmbedInput {
 fn llama_server_query_body_is_appendix_b1() {
     let server = httpmock::MockServer::start();
     let mock = server.mock(|when, then| {
-        when.method("POST").path("/v1/embeddings").json_body(serde_json::json!({
-            "model": "embeddinggemma-2",
-            "encoding_format": "float",
-            "input": "task: search result | query: pets in the lease"
-        }));
+        when.method("POST")
+            .path("/v1/embeddings")
+            .json_body(serde_json::json!({
+                "model": "embeddinggemma-2",
+                "encoding_format": "float",
+                "input": "task: search result | query: pets in the lease"
+            }));
         then.status(200).json_body(serde_json::json!({
             "data": [{ "embedding": [1.0, 0.0, 0.0, 0.0] }]
         }));
@@ -54,11 +56,13 @@ fn llama_server_omits_dimensions_key() {
     // key is absent (llama_server / litert_lm must not receive it).
     let server = httpmock::MockServer::start();
     let mock = server.mock(|when, then| {
-        when.method("POST").path("/v1/embeddings").json_body(serde_json::json!({
-            "model": "embeddinggemma-2",
-            "encoding_format": "float",
-            "input": "title: none | text: pets"
-        }));
+        when.method("POST")
+            .path("/v1/embeddings")
+            .json_body(serde_json::json!({
+                "model": "embeddinggemma-2",
+                "encoding_format": "float",
+                "input": "title: none | text: pets"
+            }));
         then.status(200).json_body(serde_json::json!({
             "data": [{ "embedding": [0.0, 1.0, 0.0, 0.0] }]
         }));
@@ -235,16 +239,18 @@ fn llama_server_image_body_is_appendix_b2() {
     // prefix) fails the mock and the unwrap below.
     let server = httpmock::MockServer::start();
     let mock = server.mock(|when, then| {
-        when.method("POST").path("/v1/embeddings").json_body(serde_json::json!({
-            "model": "embeddinggemma-2",
-            "encoding_format": "float",
-            "input": [{
-                "content": [{
-                    "type": "image_url",
-                    "image_url": { "url": "data:image/png;base64,QUJD" }
+        when.method("POST")
+            .path("/v1/embeddings")
+            .json_body(serde_json::json!({
+                "model": "embeddinggemma-2",
+                "encoding_format": "float",
+                "input": [{
+                    "content": [{
+                        "type": "image_url",
+                        "image_url": { "url": "data:image/png;base64,QUJD" }
+                    }]
                 }]
-            }]
-        }));
+            }));
         then.status(200).json_body(serde_json::json!({
             "data": [{ "embedding": [1.0, 0.0, 0.0, 0.0] }]
         }));
@@ -270,18 +276,20 @@ fn llama_server_pdf_body_is_appendix_b3() {
     // fails the mock and the unwrap below.
     let server = httpmock::MockServer::start();
     let mock = server.mock(|when, then| {
-        when.method("POST").path("/v1/embeddings").json_body(serde_json::json!({
-            "model": "embeddinggemma-2",
-            "encoding_format": "float",
-            "input": [{
-                "content": [
-                    { "type": "image_url",
-                      "image_url": { "url": "data:image/png;base64,QUJD" } },
-                    { "type": "text",
-                      "text": "title: none | text: page one pets" }
-                ]
-            }]
-        }));
+        when.method("POST")
+            .path("/v1/embeddings")
+            .json_body(serde_json::json!({
+                "model": "embeddinggemma-2",
+                "encoding_format": "float",
+                "input": [{
+                    "content": [
+                        { "type": "image_url",
+                          "image_url": { "url": "data:image/png;base64,QUJD" } },
+                        { "type": "text",
+                          "text": "title: none | text: page one pets" }
+                    ]
+                }]
+            }));
         then.status(200).json_body(serde_json::json!({
             "data": [{ "embedding": [1.0, 0.0, 0.0, 0.0] }]
         }));
@@ -304,17 +312,19 @@ fn llama_server_pdf_body_textless_page_has_empty_text_part() {
     // with an empty string — never a `<|image|>` marker.
     let server = httpmock::MockServer::start();
     let mock = server.mock(|when, then| {
-        when.method("POST").path("/v1/embeddings").json_body(serde_json::json!({
-            "model": "embeddinggemma-2",
-            "encoding_format": "float",
-            "input": [{
-                "content": [
-                    { "type": "image_url",
-                      "image_url": { "url": "data:image/png;base64,QUJD" } },
-                    { "type": "text", "text": "" }
-                ]
-            }]
-        }));
+        when.method("POST")
+            .path("/v1/embeddings")
+            .json_body(serde_json::json!({
+                "model": "embeddinggemma-2",
+                "encoding_format": "float",
+                "input": [{
+                    "content": [
+                        { "type": "image_url",
+                          "image_url": { "url": "data:image/png;base64,QUJD" } },
+                        { "type": "text", "text": "" }
+                    ]
+                }]
+            }));
         then.status(200).json_body(serde_json::json!({
             "data": [{ "embedding": [0.0, 1.0, 0.0, 0.0] }]
         }));
@@ -355,12 +365,14 @@ fn openai_query_sends_dimensions_when_not_768() {
     // B.5 with dimensions: input is a plain prefixed string.
     let server = httpmock::MockServer::start();
     let mock = server.mock(|when, then| {
-        when.method("POST").path("/v1/embeddings").json_body(serde_json::json!({
-            "model": "embeddinggemma-2",
-            "encoding_format": "float",
-            "dimensions": 4,
-            "input": "task: search result | query: pets in the lease"
-        }));
+        when.method("POST")
+            .path("/v1/embeddings")
+            .json_body(serde_json::json!({
+                "model": "embeddinggemma-2",
+                "encoding_format": "float",
+                "dimensions": 4,
+                "input": "task: search result | query: pets in the lease"
+            }));
         then.status(200).json_body(embedding_json(4));
     });
     let cfg = openai_cfg(&server.base_url(), 4);
@@ -380,11 +392,13 @@ fn openai_omits_dimensions_at_768() {
     // Exact match without the key: sending it at 768 fails the mock.
     let server = httpmock::MockServer::start();
     let mock = server.mock(|when, then| {
-        when.method("POST").path("/v1/embeddings").json_body(serde_json::json!({
-            "model": "embeddinggemma-2",
-            "encoding_format": "float",
-            "input": "title: none | text: pets"
-        }));
+        when.method("POST")
+            .path("/v1/embeddings")
+            .json_body(serde_json::json!({
+                "model": "embeddinggemma-2",
+                "encoding_format": "float",
+                "input": "title: none | text: pets"
+            }));
         then.status(200).json_body(embedding_json(768));
     });
     let cfg = openai_cfg(&server.base_url(), 768);
@@ -444,12 +458,14 @@ fn openai_pdf_page_embeds_as_text_only_document() {
     // Even with embed_page_image on: no image part, Document text only.
     let server = httpmock::MockServer::start();
     let mock = server.mock(|when, then| {
-        when.method("POST").path("/v1/embeddings").json_body(serde_json::json!({
-            "model": "embeddinggemma-2",
-            "encoding_format": "float",
-            "dimensions": 4,
-            "input": "title: none | text: page one pets"
-        }));
+        when.method("POST")
+            .path("/v1/embeddings")
+            .json_body(serde_json::json!({
+                "model": "embeddinggemma-2",
+                "encoding_format": "float",
+                "dimensions": 4,
+                "input": "title: none | text: page one pets"
+            }));
         then.status(200).json_body(embedding_json(4));
     });
     let cfg = openai_cfg(&server.base_url(), 4);
@@ -469,15 +485,17 @@ fn sglang_pdf_uses_image_marker() {
     // Frozen B.4: text starts with "<|image|>\n", image is a data URI.
     let server = httpmock::MockServer::start();
     let mock = server.mock(|when, then| {
-        when.method("POST").path("/v1/embeddings").json_body(serde_json::json!({
-            "model": "embeddinggemma-2",
-            "encoding_format": "float",
-            "dimensions": 4,
-            "input": [{
-                "text": "<|image|>\ntitle: none | text: page one pets",
-                "image": "data:image/png;base64,QUJD"
-            }]
-        }));
+        when.method("POST")
+            .path("/v1/embeddings")
+            .json_body(serde_json::json!({
+                "model": "embeddinggemma-2",
+                "encoding_format": "float",
+                "dimensions": 4,
+                "input": [{
+                    "text": "<|image|>\ntitle: none | text: page one pets",
+                    "image": "data:image/png;base64,QUJD"
+                }]
+            }));
         then.status(200).json_body(embedding_json(4));
     });
     let cfg = sglang_cfg(&server.base_url(), 4);
@@ -497,12 +515,14 @@ fn sglang_text_item_sends_dimensions_when_not_768() {
     // Text items carry {text}; dimensions only when != 768.
     let server = httpmock::MockServer::start();
     let mock = server.mock(|when, then| {
-        when.method("POST").path("/v1/embeddings").json_body(serde_json::json!({
-            "model": "embeddinggemma-2",
-            "encoding_format": "float",
-            "dimensions": 4,
-            "input": [{ "text": "title: none | text: pets" }]
-        }));
+        when.method("POST")
+            .path("/v1/embeddings")
+            .json_body(serde_json::json!({
+                "model": "embeddinggemma-2",
+                "encoding_format": "float",
+                "dimensions": 4,
+                "input": [{ "text": "title: none | text: pets" }]
+            }));
         then.status(200).json_body(embedding_json(4));
     });
     let cfg = sglang_cfg(&server.base_url(), 4);
@@ -516,15 +536,17 @@ fn sglang_textless_pdf_sends_marker_alone() {
     // Interface bullet: marker alone when textless.
     let server = httpmock::MockServer::start();
     let mock = server.mock(|when, then| {
-        when.method("POST").path("/v1/embeddings").json_body(serde_json::json!({
-            "model": "embeddinggemma-2",
-            "encoding_format": "float",
-            "dimensions": 4,
-            "input": [{
-                "text": "<|image|>",
-                "image": "data:image/png;base64,QUJD"
-            }]
-        }));
+        when.method("POST")
+            .path("/v1/embeddings")
+            .json_body(serde_json::json!({
+                "model": "embeddinggemma-2",
+                "encoding_format": "float",
+                "dimensions": 4,
+                "input": [{
+                    "text": "<|image|>",
+                    "image": "data:image/png;base64,QUJD"
+                }]
+            }));
         then.status(200).json_body(embedding_json(4));
     });
     let cfg = sglang_cfg(&server.base_url(), 4);
@@ -544,11 +566,13 @@ fn sglang_omits_dimensions_at_768() {
     // Counterpart to the openai omission case: no key at native width.
     let server = httpmock::MockServer::start();
     let mock = server.mock(|when, then| {
-        when.method("POST").path("/v1/embeddings").json_body(serde_json::json!({
-            "model": "embeddinggemma-2",
-            "encoding_format": "float",
-            "input": [{ "text": "title: none | text: pets" }]
-        }));
+        when.method("POST")
+            .path("/v1/embeddings")
+            .json_body(serde_json::json!({
+                "model": "embeddinggemma-2",
+                "encoding_format": "float",
+                "input": [{ "text": "title: none | text: pets" }]
+            }));
         then.status(200).json_body(embedding_json(768));
     });
     let cfg = sglang_cfg(&server.base_url(), 768);
@@ -563,15 +587,17 @@ fn sglang_standalone_image_uses_marker_item() {
     // Provisional shape (no live server): same marker item as the probe.
     let server = httpmock::MockServer::start();
     let mock = server.mock(|when, then| {
-        when.method("POST").path("/v1/embeddings").json_body(serde_json::json!({
-            "model": "embeddinggemma-2",
-            "encoding_format": "float",
-            "dimensions": 4,
-            "input": [{
-                "text": "<|image|>",
-                "image": "data:image/png;base64,QUJD"
-            }]
-        }));
+        when.method("POST")
+            .path("/v1/embeddings")
+            .json_body(serde_json::json!({
+                "model": "embeddinggemma-2",
+                "encoding_format": "float",
+                "dimensions": 4,
+                "input": [{
+                    "text": "<|image|>",
+                    "image": "data:image/png;base64,QUJD"
+                }]
+            }));
         then.status(200).json_body(embedding_json(4));
     });
     let cfg = sglang_cfg(&server.base_url(), 4);
@@ -593,14 +619,16 @@ fn sglang_probe_posts_b4_shape() {
     let server = httpmock::MockServer::start();
     let png_b64 = ferret::embedder::probe::PROBE_PNG_BASE64;
     let mock = server.mock(|when, then| {
-        when.method("POST").path("/v1/embeddings").json_body(serde_json::json!({
-            "model": "embeddinggemma-2",
-            "encoding_format": "float",
-            "input": [{
-                "text": "<|image|>",
-                "image": format!("data:image/png;base64,{png_b64}")
-            }]
-        }));
+        when.method("POST")
+            .path("/v1/embeddings")
+            .json_body(serde_json::json!({
+                "model": "embeddinggemma-2",
+                "encoding_format": "float",
+                "input": [{
+                    "text": "<|image|>",
+                    "image": format!("data:image/png;base64,{png_b64}")
+                }]
+            }));
         then.status(200).json_body(embedding_json(4));
     });
     let cfg = sglang_cfg(&server.base_url(), 4);
@@ -615,12 +643,14 @@ fn openai_textless_pdf_posts_empty_string() {
     // (likely a per-file 400 downstream, never an image part).
     let server = httpmock::MockServer::start();
     let mock = server.mock(|when, then| {
-        when.method("POST").path("/v1/embeddings").json_body(serde_json::json!({
-            "model": "embeddinggemma-2",
-            "encoding_format": "float",
-            "dimensions": 4,
-            "input": ""
-        }));
+        when.method("POST")
+            .path("/v1/embeddings")
+            .json_body(serde_json::json!({
+                "model": "embeddinggemma-2",
+                "encoding_format": "float",
+                "dimensions": 4,
+                "input": ""
+            }));
         then.status(200).json_body(embedding_json(4));
     });
     let cfg = openai_cfg(&server.base_url(), 4);

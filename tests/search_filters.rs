@@ -2,9 +2,9 @@
 
 mod common;
 
-use ferret::config::{compiled_defaults, Config};
+use ferret::config::{Config, compiled_defaults};
 use ferret::embedder::{EmbedInput, Embedder, FakeEmbedder};
-use ferret::search::{parse_query, run_search, FilterFlags, SearchRequest};
+use ferret::search::{FilterFlags, SearchRequest, parse_query, run_search};
 use ferret::store::{self, NewChunk, NewFile, Store};
 use ferret::types::{ChunkKind, FileKind, PrefixProfile, SearchMode};
 use std::cell::RefCell;
@@ -18,7 +18,9 @@ const DIMS: u32 = 8;
 const MTIME: i64 = 1717200000;
 
 fn cfg() -> Config {
-    let mut cfg = compiled_defaults(&common::test_dirs(std::path::Path::new("/ferret-t8-filters")));
+    let mut cfg = compiled_defaults(&common::test_dirs(std::path::Path::new(
+        "/ferret-t8-filters",
+    )));
     cfg.embedder.dimensions = DIMS;
     cfg
 }
@@ -121,8 +123,22 @@ fn search(h: &Harness, query: &str, flags: &FilterFlags) -> Vec<String> {
 #[test]
 fn kind_filter_uses_file_kind_not_chunk_kind() {
     let h = harness();
-    add_file(&h, "/x/doc.txt", FileKind::Text, ChunkKind::Text, Some("pets text"), None);
-    add_file(&h, "/x/pic.png", FileKind::Image, ChunkKind::Image, None, Some(b"pngbytes"));
+    add_file(
+        &h,
+        "/x/doc.txt",
+        FileKind::Text,
+        ChunkKind::Text,
+        Some("pets text"),
+        None,
+    );
+    add_file(
+        &h,
+        "/x/pic.png",
+        FileKind::Image,
+        ChunkKind::Image,
+        None,
+        Some(b"pngbytes"),
+    );
     let flags = FilterFlags {
         kind: vec![FileKind::Text],
         ..Default::default()
@@ -134,7 +150,14 @@ fn kind_filter_uses_file_kind_not_chunk_kind() {
 #[test]
 fn kind_pdf_prefix_matches_pdf_file_kind() {
     let h = harness();
-    add_file(&h, "/x/lease.pdf", FileKind::Pdf, ChunkKind::PdfPage, Some("pets clause"), None);
+    add_file(
+        &h,
+        "/x/lease.pdf",
+        FileKind::Pdf,
+        ChunkKind::PdfPage,
+        Some("pets clause"),
+        None,
+    );
     let p = parse_query("kind:pdf pets", &FilterFlags::default()).unwrap();
     let req = SearchRequest {
         parsed: p,
@@ -160,8 +183,22 @@ fn under_filter_restricts_to_dir() {
     std::fs::create_dir_all(&a).unwrap();
     std::fs::create_dir_all(&b).unwrap();
     let h = harness();
-    add_file(&h, a.join("in.md").to_str().unwrap(), FileKind::Text, ChunkKind::Text, Some("pets here"), None);
-    add_file(&h, b.join("out.md").to_str().unwrap(), FileKind::Text, ChunkKind::Text, Some("pets there"), None);
+    add_file(
+        &h,
+        a.join("in.md").to_str().unwrap(),
+        FileKind::Text,
+        ChunkKind::Text,
+        Some("pets here"),
+        None,
+    );
+    add_file(
+        &h,
+        b.join("out.md").to_str().unwrap(),
+        FileKind::Text,
+        ChunkKind::Text,
+        Some("pets there"),
+        None,
+    );
     let flags = FilterFlags {
         under: Some(PathBuf::from(a.to_str().unwrap())),
         ..Default::default()
@@ -173,8 +210,22 @@ fn under_filter_restricts_to_dir() {
 #[test]
 fn name_filter_restricts_to_basename_glob() {
     let h = harness();
-    add_file(&h, "/x/lease.md", FileKind::Text, ChunkKind::Text, Some("pets"), None);
-    add_file(&h, "/x/other.txt", FileKind::Text, ChunkKind::Text, Some("pets"), None);
+    add_file(
+        &h,
+        "/x/lease.md",
+        FileKind::Text,
+        ChunkKind::Text,
+        Some("pets"),
+        None,
+    );
+    add_file(
+        &h,
+        "/x/other.txt",
+        FileKind::Text,
+        ChunkKind::Text,
+        Some("pets"),
+        None,
+    );
     let flags = FilterFlags {
         name: Some("*.md".into()),
         ..Default::default()
@@ -186,8 +237,22 @@ fn name_filter_restricts_to_basename_glob() {
 #[test]
 fn ext_filter_restricts_by_extension() {
     let h = harness();
-    add_file(&h, "/x/lease.md", FileKind::Text, ChunkKind::Text, Some("pets"), None);
-    add_file(&h, "/x/notes.txt", FileKind::Text, ChunkKind::Text, Some("pets"), None);
+    add_file(
+        &h,
+        "/x/lease.md",
+        FileKind::Text,
+        ChunkKind::Text,
+        Some("pets"),
+        None,
+    );
+    add_file(
+        &h,
+        "/x/notes.txt",
+        FileKind::Text,
+        ChunkKind::Text,
+        Some("pets"),
+        None,
+    );
     let flags = FilterFlags {
         ext: vec!["md".into()],
         ..Default::default()

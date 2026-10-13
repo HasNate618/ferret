@@ -1,7 +1,7 @@
 //! Task 9: text extraction and chunking.
 
 use ferret::config::TextChunkConfig;
-use ferret::extract::{extract_text, Chunk, EmbedDecision};
+use ferret::extract::{Chunk, EmbedDecision, extract_text};
 use ferret::types::{ChunkKind, TextChunkMode};
 use std::path::Path;
 
@@ -157,17 +157,36 @@ fn all_chunks_are_text_kind() {
 
 #[test]
 fn testdata_files_parse() {
-    let sentences =
-        extract_text(Path::new("testdata/two_sentences.txt"), b"Hello world. Goodbye moon.", &chars_cfg()).unwrap();
+    let sentences = extract_text(
+        Path::new("testdata/two_sentences.txt"),
+        b"Hello world. Goodbye moon.",
+        &chars_cfg(),
+    )
+    .unwrap();
     assert_eq!(sentences.len(), 1);
     assert!(matches!(sentences[0].embed, EmbedDecision::Vec));
 
-    let numeric = extract_text(Path::new("testdata/numeric.txt"), b"1234567890 12345", &chars_cfg()).unwrap();
+    let numeric = extract_text(
+        Path::new("testdata/numeric.txt"),
+        b"1234567890 12345",
+        &chars_cfg(),
+    )
+    .unwrap();
     assert!(matches!(numeric[0].embed, EmbedDecision::FtsOnly));
 
-    let letterless = extract_text(Path::new("testdata/letterless.txt"), b"***\n---\n", &chars_cfg()).unwrap();
+    let letterless = extract_text(
+        Path::new("testdata/letterless.txt"),
+        b"***\n---\n",
+        &chars_cfg(),
+    )
+    .unwrap();
     assert!(letterless.is_empty());
 
-    let html = extract_text(Path::new("testdata/sample.html"), b"<p>Hi&amp;bye</p>", &chars_cfg()).unwrap();
+    let html = extract_text(
+        Path::new("testdata/sample.html"),
+        b"<p>Hi&amp;bye</p>",
+        &chars_cfg(),
+    )
+    .unwrap();
     assert_eq!(html[0].text.as_deref(), Some("Hi&bye"));
 }

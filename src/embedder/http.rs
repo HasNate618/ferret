@@ -9,7 +9,7 @@ use reqwest::blocking::Client;
 use serde_json::json;
 
 use super::probe;
-use super::{apply_prefix, l2_normalize, truncate_or_check, EmbedInput, Embedder};
+use super::{EmbedInput, Embedder, apply_prefix, l2_normalize, truncate_or_check};
 use crate::config::Config;
 use crate::error::{Error, Result};
 use crate::types::Backend;
@@ -227,7 +227,9 @@ impl HttpEmbedder {
                         last_err = format!("{url} -> {status}");
                         continue;
                     } else if status.is_client_error() {
-                        return Err(Error::file(format!("embedder rejected the request ({status} for {url}); file skipped")));
+                        return Err(Error::file(format!(
+                            "embedder rejected the request ({status} for {url}); file skipped"
+                        )));
                     } else {
                         return Err(Error::fatal(format!(
                             "embedder failed ({status} for {url})"
@@ -358,18 +360,18 @@ pub(crate) fn has_embedding(v: &serde_json::Value) -> bool {
 /// `data[0].embedding` as `Vec<f32>`; anything else is a fatal protocol
 /// error (the server spoke, but not embeddings).
 fn parse_embedding(resp: reqwest::blocking::Response) -> Result<Vec<f32>> {
-    let v: serde_json::Value = resp.json().map_err(|e| {
-        Error::fatal(format!("embedder returned a non-JSON response: {e}"))
-    })?;
+    let v: serde_json::Value = resp
+        .json()
+        .map_err(|e| Error::fatal(format!("embedder returned a non-JSON response: {e}")))?;
     v.pointer("/data/0/embedding")
         .and_then(|e| e.as_array())
         .ok_or_else(|| Error::fatal("embedder response has no data[0].embedding"))
         .and_then(|arr| {
             arr.iter()
                 .map(|n| {
-                    n.as_f64()
-                        .map(|f| f as f32)
-                        .ok_or_else(|| Error::fatal("embedder returned a non-numeric embedding value"))
+                    n.as_f64().map(|f| f as f32).ok_or_else(|| {
+                        Error::fatal("embedder returned a non-numeric embedding value")
+                    })
                 })
                 .collect()
         })

@@ -216,7 +216,11 @@ fn execute(
             ConfigCmd::Show => config_show(&opts, stdout),
             ConfigCmd::Path => config_path(&opts, stdout),
         },
-        Command::Index { paths, json, strict } => {
+        Command::Index {
+            paths,
+            json,
+            strict,
+        } => {
             let cfg = config::load(&opts)?;
             upload_warning(&cfg, stderr);
             let embedder = embedder::build_embedder(&cfg, &|k| std::env::var(k).ok())?;
@@ -407,10 +411,7 @@ fn split_kinds(values: &[String]) -> Result<Vec<FileKind>> {
             if part.is_empty() {
                 continue;
             }
-            out.push(
-                FileKind::from_str(part)
-                    .map_err(|e| Error::usage(format!("--kind: {e}")))?,
-            );
+            out.push(FileKind::from_str(part).map_err(|e| Error::usage(format!("--kind: {e}")))?);
         }
     }
     Ok(out)

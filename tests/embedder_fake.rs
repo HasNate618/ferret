@@ -6,7 +6,7 @@ mod common;
 use common::test_dirs;
 use ferret::config::compiled_defaults;
 use ferret::embedder::{
-    build_embedder, l2_normalize, truncate_or_check, EmbedInput, Embedder, FakeEmbedder,
+    EmbedInput, Embedder, FakeEmbedder, build_embedder, l2_normalize, truncate_or_check,
 };
 use ferret::types::{Backend, PrefixProfile, QueryTask};
 
@@ -29,7 +29,10 @@ fn build_embedder_fake_env_wins_over_any_backend() {
     let e = build_embedder(&cfg, &fake_env).unwrap();
     assert!(e.images_supported());
     let v = e
-        .embed(EmbedInput::Query { text: "pets".into(), task: QueryTask::Search })
+        .embed(EmbedInput::Query {
+            text: "pets".into(),
+            task: QueryTask::Search,
+        })
         .unwrap();
     assert_eq!(v.len(), cfg.embedder.dimensions as usize);
     assert!(v.iter().all(|x| x.is_finite()));
@@ -57,16 +60,35 @@ fn build_embedder_without_fake_health_checks() {
 fn fake_vectors_differ_per_input_kind() {
     let e = FakeEmbedder::new(8);
     let query = e
-        .embed(EmbedInput::Query { text: "hi".into(), task: QueryTask::Search })
+        .embed(EmbedInput::Query {
+            text: "hi".into(),
+            task: QueryTask::Search,
+        })
         .unwrap();
     let doc = e
-        .embed(EmbedInput::Document { title: None, text: "hi".into() })
+        .embed(EmbedInput::Document {
+            title: None,
+            text: "hi".into(),
+        })
         .unwrap();
-    let image = e.embed(EmbedInput::Image { bytes: b"hi".to_vec(), mime: "image/png".into() }).unwrap();
-    let page_textless =
-        e.embed(EmbedInput::PdfPage { image_png: b"hi".to_vec(), text: None }).unwrap();
-    let page_with_text =
-        e.embed(EmbedInput::PdfPage { image_png: b"hi".to_vec(), text: Some("hi".into()) }).unwrap();
+    let image = e
+        .embed(EmbedInput::Image {
+            bytes: b"hi".to_vec(),
+            mime: "image/png".into(),
+        })
+        .unwrap();
+    let page_textless = e
+        .embed(EmbedInput::PdfPage {
+            image_png: b"hi".to_vec(),
+            text: None,
+        })
+        .unwrap();
+    let page_with_text = e
+        .embed(EmbedInput::PdfPage {
+            image_png: b"hi".to_vec(),
+            text: Some("hi".into()),
+        })
+        .unwrap();
     // Same payload bytes, different kinds: all five vectors are distinct.
     for (name, v) in [
         ("query", &query),
@@ -93,10 +115,16 @@ fn fake_vectors_differ_per_input_kind() {
 fn fake_query_task_changes_vector() {
     let e = FakeEmbedder::new(8);
     let search = e
-        .embed(EmbedInput::Query { text: "parse".into(), task: QueryTask::Search })
+        .embed(EmbedInput::Query {
+            text: "parse".into(),
+            task: QueryTask::Search,
+        })
         .unwrap();
     let code = e
-        .embed(EmbedInput::Query { text: "parse".into(), task: QueryTask::Code })
+        .embed(EmbedInput::Query {
+            text: "parse".into(),
+            task: QueryTask::Code,
+        })
         .unwrap();
     assert_ne!(search, code);
 }
@@ -105,7 +133,10 @@ fn fake_query_task_changes_vector() {
 fn fake_respects_profile_and_dimensions() {
     let gemma2 = FakeEmbedder::new_with_profile(PrefixProfile::EmbeddingGemma2, 128);
     let litert = FakeEmbedder::new_with_profile(PrefixProfile::LitertLm, 128);
-    let input = EmbedInput::Query { text: "pets".into(), task: QueryTask::Search };
+    let input = EmbedInput::Query {
+        text: "pets".into(),
+        task: QueryTask::Search,
+    };
     let a = gemma2.embed(input.clone()).unwrap();
     let b = litert.embed(input).unwrap();
     assert_eq!(a.len(), 128);
@@ -116,8 +147,14 @@ fn fake_respects_profile_and_dimensions() {
 fn fake_embed_batch_matches_embed() {
     let e = FakeEmbedder::new(8);
     let inputs = vec![
-        EmbedInput::Document { title: Some("a.txt".into()), text: "hi".into() },
-        EmbedInput::Query { text: "pets".into(), task: QueryTask::Search },
+        EmbedInput::Document {
+            title: Some("a.txt".into()),
+            text: "hi".into(),
+        },
+        EmbedInput::Query {
+            text: "pets".into(),
+            task: QueryTask::Search,
+        },
     ];
     let batch = e.embed_batch(&inputs).unwrap();
     assert_eq!(batch[0], e.embed(inputs[0].clone()).unwrap());

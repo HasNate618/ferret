@@ -78,9 +78,8 @@ pub fn extract_image(
         path.to_path_buf()
     };
 
-    let img = image::open(&source).map_err(|e| {
-        Error::file(format!("cannot decode image {}: {e}", path.display()))
-    })?;
+    let img = image::open(&source)
+        .map_err(|e| Error::file(format!("cannot decode image {}: {e}", path.display())))?;
     // `image::open` yields the first frame of GIF/WebP animations.
     let (w, h) = (img.width(), img.height());
     let edge = image_cfg.max_edge_px.max(1);
@@ -113,8 +112,8 @@ pub fn extract_image(
 /// after use by contract. A failed conversion is an extract error. The source path is canonicalized so a corpus file named like a
 /// flag (`-define`, `--version`) cannot inject converter options.
 fn convert_heic(path: &Path, cache_dir: &Path) -> Result<PathBuf> {
-    let converter =
-        find_magick().ok_or_else(|| Error::fatal("heic conversion needs magick or convert on PATH"))?;
+    let converter = find_magick()
+        .ok_or_else(|| Error::fatal("heic conversion needs magick or convert on PATH"))?;
     let out_dir = cache_dir.join("heic");
     std::fs::create_dir_all(&out_dir)?;
     let stem = path

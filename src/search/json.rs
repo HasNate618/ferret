@@ -3,7 +3,7 @@
 //! JSON is a frozen client contract: one object on stdout, nothing else.
 //! Warnings and progress go to stderr. Human mode is not a contract.
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::search::SearchOutput;
 
@@ -78,11 +78,9 @@ pub fn render_human(out: &SearchOutput) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::search::{
-        Filters, Hit, HitScores, ParsedQuery, QueryTask, SearchMode,
-    };
-    use crate::types::FileKind::{Pdf, Text};
+    use crate::search::{Filters, Hit, HitScores, ParsedQuery, QueryTask, SearchMode};
     use crate::types::ChunkKind::PdfPage;
+    use crate::types::FileKind::{Pdf, Text};
     use std::path::PathBuf;
 
     fn output() -> SearchOutput {

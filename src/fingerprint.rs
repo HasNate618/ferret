@@ -70,9 +70,15 @@ fn config_fingerprint_value(cfg: &Config, images_supported: bool) -> Value {
             .collect(),
     );
     object(vec![
-        ("backend".into(), Value::String(cfg.embedder.backend.to_string())),
+        (
+            "backend".into(),
+            Value::String(cfg.embedder.backend.to_string()),
+        ),
         ("dimensions".into(), Value::from(cfg.embedder.dimensions)),
-        ("embed_recipe".into(), Value::String(EMBED_RECIPE.to_string())),
+        (
+            "embed_recipe".into(),
+            Value::String(EMBED_RECIPE.to_string()),
+        ),
         ("extension_kind".into(), extension_kind),
         (
             "image_pipeline".into(),
@@ -83,7 +89,10 @@ fn config_fingerprint_value(cfg: &Config, images_supported: bool) -> Value {
             "prefix_profile".into(),
             Value::String(cfg.embedder.prefix_profile.to_string()),
         ),
-        ("prefix_version".into(), Value::String(PREFIX_VERSION.to_string())),
+        (
+            "prefix_version".into(),
+            Value::String(PREFIX_VERSION.to_string()),
+        ),
         ("text_pipeline".into(), text_pipeline_value(cfg)),
     ])
 }
@@ -92,16 +101,28 @@ fn config_fingerprint_value(cfg: &Config, images_supported: bool) -> Value {
 fn text_pipeline_value(cfg: &Config) -> Value {
     let pdf = object(vec![
         ("embed_text".into(), Value::Bool(cfg.chunk.pdf.embed_text)),
-        ("first_pass_pages".into(), Value::from(cfg.chunk.pdf.first_pass_pages)),
+        (
+            "first_pass_pages".into(),
+            Value::from(cfg.chunk.pdf.first_pass_pages),
+        ),
         ("max_pages".into(), Value::from(cfg.chunk.pdf.max_pages)),
     ]);
     object(vec![
         ("max_chars".into(), Value::from(cfg.chunk.text.max_chars)),
-        ("mode".into(), Value::String(cfg.chunk.text.mode.to_string())),
-        ("numeric_heavy".into(), Value::from(cfg.chunk.text.numeric_heavy)),
+        (
+            "mode".into(),
+            Value::String(cfg.chunk.text.mode.to_string()),
+        ),
+        (
+            "numeric_heavy".into(),
+            Value::from(cfg.chunk.text.numeric_heavy),
+        ),
         ("overlap".into(), Value::from(cfg.chunk.text.overlap)),
         ("pdf".into(), pdf),
-        ("skip_letterless".into(), Value::Bool(cfg.chunk.text.skip_letterless)),
+        (
+            "skip_letterless".into(),
+            Value::Bool(cfg.chunk.text.skip_letterless),
+        ),
     ])
 }
 
@@ -110,13 +131,19 @@ fn text_pipeline_value(cfg: &Config) -> Value {
 /// `max_chars` must not re-render page images (spec §13).
 fn image_pipeline_value(cfg: &Config, images_supported: bool) -> Value {
     let pdf = object(vec![
-        ("embed_page_image".into(), Value::Bool(cfg.chunk.pdf.embed_page_image)),
+        (
+            "embed_page_image".into(),
+            Value::Bool(cfg.chunk.pdf.embed_page_image),
+        ),
         ("render_dpi".into(), Value::from(cfg.chunk.pdf.render_dpi)),
     ]);
     object(vec![
         ("heic".into(), Value::String(cfg.files.heic.to_string())),
         ("images_supported".into(), Value::Bool(images_supported)),
-        ("max_edge_px".into(), Value::from(cfg.chunk.image.max_edge_px)),
+        (
+            "max_edge_px".into(),
+            Value::from(cfg.chunk.image.max_edge_px),
+        ),
         ("pdf".into(), pdf),
     ])
 }
@@ -179,7 +206,9 @@ mod tests {
     #[test]
     fn file_fingerprint_includes_unit_separator() {
         let fp = file_fingerprint("/a/b.txt", 1, 2, "abcd");
-        let expected = blake3::hash(b"/a/b.txt\x1f1\x1f2\x1fabcd").to_hex().to_string();
+        let expected = blake3::hash(b"/a/b.txt\x1f1\x1f2\x1fabcd")
+            .to_hex()
+            .to_string();
         assert_eq!(fp, expected);
     }
 }

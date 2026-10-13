@@ -53,7 +53,10 @@ fn rm_present_path_deletes_row_chunks_vec_and_fts() {
     assert!(vec_count(&env.index) > 0);
     let target = env.root.join("pets.md");
     ferret::cli::try_run(&["ferret", "rm", target.to_str().unwrap()]).unwrap();
-    assert!(file_row(&env.index, "pets.md").is_none(), "file row must go");
+    assert!(
+        file_row(&env.index, "pets.md").is_none(),
+        "file row must go"
+    );
     assert_eq!(chunk_count(&env.index), 0, "chunks must cascade");
     assert_eq!(vec_count(&env.index), 0, "vec rows must not orphan");
     let conn = rusqlite::Connection::open(&env.index).unwrap();
@@ -73,7 +76,10 @@ fn gc_deletes_gone_files() {
     std::fs::remove_file(env.root.join("gone.md")).unwrap();
     let out = ferret::cli::try_run(&["ferret", "gc"]).unwrap();
     assert!(file_row(&env.index, "gone.md").is_none());
-    assert!(file_row(&env.index, "pets.md").is_some(), "gc keeps live files");
+    assert!(
+        file_row(&env.index, "pets.md").is_some(),
+        "gc keeps live files"
+    );
     assert_eq!(vec_count(&env.index), chunk_count(&env.index));
     let _ = out;
 }
@@ -177,8 +183,16 @@ fn image_file_without_image_backend_is_skip_not_error() {
     ));
     // Run the real pipeline with the image-refusing embedder.
     let mut stdout: Vec<u8> = Vec::new();
-    let summary =
-        ferret::index::run(&loaded, &no_img, vec![], true, false, &mut stdout, &mut Vec::new()).unwrap();
+    let summary = ferret::index::run(
+        &loaded,
+        &no_img,
+        vec![],
+        true,
+        false,
+        &mut stdout,
+        &mut Vec::new(),
+    )
+    .unwrap();
     assert_eq!(summary.errors, 0, "capability skip is not an error");
     let events = String::from_utf8(stdout).unwrap();
     assert!(

@@ -50,6 +50,7 @@ pub fn render_json(out: &SearchOutput) -> String {
         "min_score": out.min_score,
         "filters": filters,
         "hits": hits,
+        "warnings": out.warnings,
     })
     .to_string()
 }
@@ -116,6 +117,7 @@ mod tests {
                 },
                 snippet: "...pets are not permitted...".into(),
             }],
+            warnings: vec!["browse_no_vec"],
         }
     }
 
@@ -127,6 +129,7 @@ mod tests {
         assert_eq!(h["chunk_kind"], "pdf_page");
         assert!(h["scores"]["filename"].is_null());
         assert_eq!(h["scores"]["vec"], 0.81);
+        assert_eq!(v["warnings"], serde_json::json!(["browse_no_vec"]));
     }
 
     #[test]

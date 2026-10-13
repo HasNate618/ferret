@@ -449,9 +449,17 @@ FTS operators (`"phrase"`, `OR`, `NOT`, `AND`) apply only to the keyword arm. `+
       "scores": { "vec": 0.81, "fts": -5.12, "filename": -1.04 },
       "snippet": "...pets are not permitted without written consent..."
     }
-  ]
+  ],
+  "warnings": []
 }
 ```
+
+`warnings` is always present (possibly empty) with zero or more stable string codes:
+
+- `vec_starved` — a path-scoping filter (`--under` or `--name`) was present AND at least one hit was returned AND zero returned hits have a non-null `scores.vec`. The results are keyword-only; widen the filter or raise `search.candidates`.
+- `browse_no_vec` — the query carried no searchable text so only the FTS arm ran (filter-only browse, or `--mode keyword`).
+
+No other codes exist in v1.1. Parsers match codes on exact equality.
 
 - `page` is `null` for non-PDF.
 - `ordinal` is 0-based (`page` 12 with pages 1–12 present → `ordinal` 11).

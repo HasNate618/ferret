@@ -261,7 +261,7 @@ git commit -m "feat: list configured roots in status --json"
 - Consumes: parsed request (which of `--under`/`--name` present), per-arm hit contribution (did the vec arm return any hit with non-null `scores.vec`?), total hit count.
 - Produces: top-level `"warnings": []` (always present, possibly empty) containing zero or more of exactly these string codes:
   - `"vec_starved"` — a path-scoping filter (`--under` or `--name`) was present AND at least one hit was returned AND zero returned hits have non-null `scores.vec`.
-  - `"browse_no_vec"` — the query carried no searchable text so only the FTS arm ran (existing filter-only browse behavior, now labeled).
+  - `"browse_no_vec"` — only the FTS arm ran: the query carried no searchable text (existing filter-only browse behavior, now labeled), or explicit `--mode keyword`.
   - No other codes in v1.1. Codes are stable strings; parsers match on exact equality.
 
 - [ ] **Step 1: Write the failing tests**

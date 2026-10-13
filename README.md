@@ -130,7 +130,8 @@ and agents. Quickshell QML intentionally lives **outside** this repo.
     "score": 0.0163,
     "scores": { "vec": 0.766, "fts": null, "filename": null },
     "snippet": "The lease forbids pets…"
-  }]
+  }],
+  "warnings": []
 }
 ```
 
@@ -145,6 +146,10 @@ Field notes for client authors:
 - `--under DIR` / `--name GLOB` filter in SQL *before* ranking. With
   very selective filters the semantic arm can starve (zero vector
   candidates): widen the filter or raise `search.candidates`.
+  `warnings` labels this (`vec_starved`: scoped filters ran, hits
+  returned, none with a vec score) and filter-only browsing
+  (`browse_no_vec`: no query text, only FTS ran — incl. `--mode keyword`).
+  Always present, possibly empty.
 - `page` is 1-based for PDF hits, null otherwise. `chunk_kind` is
   `text` | `image` | `pdf_page`. The `after` / `before` filters render
   as unix timestamps (`i64`).

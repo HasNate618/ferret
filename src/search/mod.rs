@@ -61,6 +61,11 @@ pub struct SearchOutput {
     pub min_score: f64,
     pub filters: Filters,
     pub hits: Vec<Hit>,
+    /// Stable machine-readable codes (spec §8): `vec_starved` (scoped
+    /// filters ran but no returned hit has a vec score), `browse_no_vec`
+    /// (no searchable text, so only the FTS arm ran). Always rendered,
+    /// possibly empty.
+    pub warnings: Vec<&'static str>,
 }
 
 /// Run the three-arm hybrid search (spec §6.1):
@@ -204,6 +209,17 @@ pub fn run_search(
         )?);
     }
 
+    // v1.1 warnings (spec §8), computed from the fused hits before render.
+    let mut warnings: Vec<&'static str> = Vec::new();
+    let scoped = filters.under.is_some() || filters.name.is_some();
+    let any_vec = hits.iter().any(|h| h.scores.vec.is_some());
+    if scoped && !hits.is_empty() && !any_vec {
+        warnings.push("vec_starved");
+    }
+    if !want_vec {
+        warnings.push("browse_no_vec");
+    }
+
     Ok(SearchOutput {
         query: parsed.nl_query,
         task: parsed.task,
@@ -212,6 +228,7 @@ pub fn run_search(
         min_score: req.min_score,
         filters,
         hits,
+        warnings,
     })
 }
 

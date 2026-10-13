@@ -204,3 +204,92 @@ fn keyword_mode_leaves_vec_score_null() {
     let v: serde_json::Value = serde_json::from_str(&render_json(&out)).unwrap();
     assert!(v["hits"][0]["scores"]["vec"].is_null());
 }
+
+#[test]
+#[serial_test::serial]
+fn search_json_warnings_empty_when_unscoped() {
+    let _env = common::test_env();
+    ferret::cli::try_run(&["ferret", "index"]).unwrap();
+    let out = ferret::cli::try_run(&["ferret", "search", "--json", "pets"]).unwrap();
+    let v: serde_json::Value = serde_json::from_str(&out.stdout).unwrap();
+    assert_eq!(v["warnings"], serde_json::json!([]));
+}
+
+#[test]
+#[serial_test::serial]
+fn search_json_no_warning_when_under_matches_nothing() {
+    let env = common::test_env();
+    let empty = env.root.join("empty");
+    std::fs::create_dir_all(&empty).unwrap();
+    ferret::cli::try_run(&["ferret", "index"]).unwrap();
+    let out = ferret::cli::try_run(&[
+        "ferret",
+        "search",
+        "--json",
+        "pets",
+        "--under",
+        empty.to_str().unwrap(),
+    ])
+    .unwrap();
+    let v: serde_json::Value = serde_json::from_str(&out.stdout).unwrap();
+    assert!(v["hits"].as_array().unwrap().is_empty());
+    // Empty hits => no vec_starved (rule needs >= 1 hit); warnings present but empty.
+    assert_eq!(v["warnings"], serde_json::json!([]));
+}
+
+#[test]
+#[serial_test::serial]
+fn search_json_vec_starved_when_only_fts_hits() {
+    let _env = common::test_env();
+    ferret::cli::try_run(&["ferret", "index"]).unwrap();
+    let out = ferret::cli::try_run(&[
+        "ferret", "search", "--json", "--mode", "keyword", "--name", "*.md", "pets",
+    ])
+    .unwrap();
+    let v: serde_json::Value = serde_json::from_str(&out.stdout).unwrap();
+    let hits = v["hits"].as_array().unwrap();
+    assert!(!hits.is_empty());
+    assert!(hits.iter().all(|h| h["scores"]["vec"].is_null()));
+    assert!(
+        v["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|w| w == "vec_starved")
+    );
+}
+
+#[test]
+#[serial_test::serial]
+fn search_json_no_vec_starved_when_hybrid_vec_contributes() {
+    // The rule's third conjunct: scoped + hits + any vec score => no warning.
+    // (Positive hybrid starvation needs a real embedder + large index — with
+    // the fake the vec arm always contributes in scope; the fires-case is
+    // covered deterministically by ..._vec_starved_when_only_fts_hits.)
+    let _env = common::test_env();
+    ferret::cli::try_run(&["ferret", "index"]).unwrap();
+    let out = ferret::cli::try_run(&["ferret", "search", "--json", "--name", "*.md", "pets"])
+        .unwrap();
+    let v: serde_json::Value = serde_json::from_str(&out.stdout).unwrap();
+    let hits = v["hits"].as_array().unwrap();
+    assert!(!hits.is_empty());
+    assert!(hits.iter().any(|h| !h["scores"]["vec"].is_null()));
+    assert_eq!(v["warnings"], serde_json::json!([]));
+}
+
+#[test]
+#[serial_test::serial]
+fn search_json_browse_labels_no_vec() {
+    let _env = common::test_env();
+    ferret::cli::try_run(&["ferret", "index"]).unwrap();
+    let out =
+        ferret::cli::try_run(&["ferret", "search", "--json", "--kind", "text"]).unwrap();
+    let v: serde_json::Value = serde_json::from_str(&out.stdout).unwrap();
+    assert!(
+        v["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|w| w == "browse_no_vec")
+    );
+}

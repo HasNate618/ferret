@@ -134,7 +134,10 @@ pub fn probe_audio(client: &Client, cfg: &Config) -> bool {
         Ok(r) if r.status().is_success() => r.json::<serde_json::Value>().is_ok_and(|v| {
             v.pointer("/data/0/embedding")
                 .and_then(|e| e.as_array())
-                .is_some_and(|a| a.len() == 768)
+                .is_some_and(|a| {
+                    a.len() == 768
+                        && a.iter().all(|v| v.as_f64().is_some_and(|f| f.is_finite()))
+                })
         }),
         _ => false,
     }

@@ -1162,6 +1162,23 @@ fn index_file(
                 "internal error: PDF reached text indexing (report a bug)",
             ));
         }
+        FileKind::Audio => {
+            // Transient (audio milestone Task 6 wires the real arm): the
+            // kind resolves from Task 1, so record-and-continue rather
+            // than fatal on audio files met before then.
+            record_extract_error(
+                store,
+                &mut sink,
+                &path,
+                &collection,
+                kind,
+                &ext,
+                config_fp,
+                Error::file("audio indexing is not wired yet (audio milestone Task 6)"),
+                summary,
+            )?;
+            return Ok(());
+        }
     };
 
     // --- embed phase (embedder failures are FATAL, not per-file) ---------

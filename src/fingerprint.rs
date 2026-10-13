@@ -71,6 +71,10 @@ fn config_fingerprint_value(cfg: &Config, images_supported: bool) -> Value {
     );
     object(vec![
         (
+            "audio_pipeline".into(),
+            audio_pipeline_value(cfg),
+        ),
+        (
             "backend".into(),
             Value::String(cfg.embedder.backend.to_string()),
         ),
@@ -95,6 +99,15 @@ fn config_fingerprint_value(cfg: &Config, images_supported: bool) -> Value {
         ),
         ("text_pipeline".into(), text_pipeline_value(cfg)),
     ])
+}
+
+/// Audio pipeline: segment length only. Changing it re-segments and
+/// re-embeds audio files, nothing else.
+fn audio_pipeline_value(cfg: &Config) -> Value {
+    object(vec![(
+        "segment_secs".into(),
+        Value::from(cfg.chunk.audio.segment_secs as i64),
+    )])
 }
 
 /// Text pipeline: text chunking plus PDF text embedding knobs.

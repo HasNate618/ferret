@@ -383,3 +383,38 @@ fn root_slash_shorthand_gets_nonempty_collection() {
     assert_eq!(c.index.roots.len(), 1);
     assert!(!c.index.roots[0].collection.is_empty());
 }
+
+#[test]
+fn audio_kinds_parse_and_display() {
+    use ferret::types::{ChunkKind, FileKind};
+    assert_eq!("audio".parse::<FileKind>().unwrap(), FileKind::Audio);
+    assert_eq!(ChunkKind::AudioSegment.to_string(), "audio_segment");
+}
+
+#[test]
+fn compiled_defaults_include_audio() {
+    let c = compiled_defaults(&dirs());
+    for ext in ["mp3", "wav", "flac", "ogg", "opus", "m4a", "aac"] {
+        assert_eq!(c.files.extension_kind.get(ext), Some(&ferret::types::FileKind::Audio));
+    }
+    assert_eq!(c.chunk.audio.segment_secs, 30);
+    assert!(c.extract.ffmpeg_dir.is_empty());
+}
+
+#[test]
+fn zero_segment_secs_is_fatal() {
+    use std::collections::HashMap;
+    let files: HashMap<PathBuf, String> = HashMap::from([(
+        PathBuf::from("/tmp/ferret-cfg/config.toml"),
+        "[chunk.audio]\nsegment_secs = 0\n".into(),
+    )]);
+    let err = load_from(
+        &LoadOpts { config_flag: None, index_flag: None },
+        &dirs(),
+        &|_| None,
+        Path::new("/tmp/cwd"),
+        &|p| files.get(p).cloned().ok_or_else(|| ferret::error::Error::fatal("missing")),
+    )
+    .unwrap_err();
+    assert!(err.to_string().contains("segment_secs"));
+}

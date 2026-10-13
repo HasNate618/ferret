@@ -135,7 +135,7 @@ Image support for a process (`images_supported`):
 
 `ferret init` does not write `multimodal`; operators set it when they do not want a probe.
 
-Index meta stores `model_id` (`= embedder.model`), `dimensions`, `backend`, `prefix_profile`, `images_supported` (the value used for this index), `text_pipeline`, `image_pipeline`, and `config_fingerprint`. Opening an index whose `model_id`, `dimensions`, or `prefix_profile` differ from the merged config is a hard error (exit 1): use a new `--index` path, or delete the sqlite file. `ferret rm` only deletes file rows; it does not change meta. A `backend` change with the same `model_id`, `dimensions`, and `prefix_profile` is a stderr warning, not an error.
+Index meta stores `model_id` (`= embedder.model`), `dimensions`, `backend`, `prefix_profile`, `images_supported` (the value used for this index), `text_pipeline`, `image_pipeline`, `audio_pipeline` (`{segment_secs}`), and `config_fingerprint`. Opening an index whose `model_id`, `dimensions`, or `prefix_profile` differ from the merged config is a hard error (exit 1): use a new `--index` path, or delete the sqlite file. `ferret rm` only deletes file rows; it does not change meta. A `backend` change with the same `model_id`, `dimensions`, and `prefix_profile` is a stderr warning, not an error.
 
 `images_supported` is part of `config_fingerprint` ([Appendix A](#appendix-a-config-fingerprint)). Indexing without mmproj, then later with mmproj, **must** re-embed affected files. Do not store a capability skip as a finished image index that later `index` runs ignore.
 
@@ -283,7 +283,7 @@ Require **SQLite ≥ 3.38** (rusqlite `bundled` feature). Multi-value `--kind` /
 
 ### 5.1 Schema (version 1)
 
-`meta` key/value includes: `schema_version=1`, `model_id`, `dimensions`, `backend`, `prefix_profile`, `images_supported`, `config_fingerprint`, `text_pipeline`, `image_pipeline`.
+`meta` key/value includes: `schema_version=1`, `model_id`, `dimensions`, `backend`, `prefix_profile`, `images_supported`, `config_fingerprint`, `text_pipeline`, `image_pipeline`, `audio_pipeline`.
 
 **files**
 
@@ -322,7 +322,7 @@ Require **SQLite ≥ 3.38** (rusqlite `bundled` feature). Multi-value `--kind` /
 
 `files.fingerprint = blake3(canonical_path || 0x1f || mtime ascii || 0x1f || size ascii || 0x1f || config_fingerprint)` as hex.
 
-`config_fingerprint = blake3(canonical JSON in Appendix A)` as hex. That JSON includes `text_pipeline` and `image_pipeline` objects (not a single blob of every knob).
+`config_fingerprint = blake3(canonical JSON in Appendix A)` as hex. That JSON includes `text_pipeline`, `image_pipeline`, and `audio_pipeline` objects (not a single blob of every knob). Adding `audio_pipeline` changes the fingerprint for existing indexes, so the next `ferret index` re-embeds audio files under the new segmentation (same fingerprint-gated mechanism as text/image pipeline bumps).
 
 Reindex granularity (Semantra: changing text chunk size must not re-embed PNGs):
 

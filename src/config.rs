@@ -94,6 +94,7 @@ pub struct ChunkConfig {
     pub text: TextChunkConfig,
     pub pdf: PdfChunkConfig,
     pub image: ImageChunkConfig,
+    pub audio: AudioChunkConfig,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -120,11 +121,21 @@ pub struct ImageChunkConfig {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct AudioChunkConfig {
+    /// Clip length in seconds; each segment embeds as one vector (~25
+    /// tokens/sec of audio, so 30s ≈ 750 tokens).
+    pub segment_secs: u64,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct ExtractConfig {
     pub poppler_dir: String,
     pub pdfinfo: String,
     pub pdftotext: String,
     pub pdftoppm: String,
+    /// Directory containing `ffmpeg`/`ffprobe`, mirroring `poppler_dir`:
+    /// empty means search PATH.
+    pub ffmpeg_dir: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -254,12 +265,14 @@ pub fn compiled_defaults(dirs: &FerretDirs) -> Config {
                 embed_page_image: true,
             },
             image: ImageChunkConfig { max_edge_px: 1024 },
+            audio: AudioChunkConfig { segment_secs: 30 },
         },
         extract: ExtractConfig {
             poppler_dir: String::new(),
             pdfinfo: String::new(),
             pdftotext: String::new(),
             pdftoppm: String::new(),
+            ffmpeg_dir: String::new(),
         },
         files: FilesConfig {
             follow_symlinks: false,
@@ -308,6 +321,11 @@ fn default_extension_kind() -> BTreeMap<String, FileKind> {
         &["jpg", "jpeg", "png", "webp", "gif", "bmp"],
     );
     put(&mut map, FileKind::Pdf, &["pdf"]);
+    put(
+        &mut map,
+        FileKind::Audio,
+        &["mp3", "wav", "flac", "ogg", "opus", "m4a", "aac"],
+    );
     map
 }
 
@@ -436,10 +454,16 @@ pub fn to_display_toml(cfg: &Config) -> String {
         "max_edge_px".into(),
         Value::from(cfg.chunk.image.max_edge_px),
     );
+    let mut audio = Table::new();
+    audio.insert(
+        "segment_secs".into(),
+        Value::from(cfg.chunk.audio.segment_secs as i64),
+    );
     let mut chunk = Table::new();
     chunk.insert("text".into(), Value::Table(text));
     chunk.insert("pdf".into(), Value::Table(pdf));
     chunk.insert("image".into(), Value::Table(image));
+    chunk.insert("audio".into(), Value::Table(audio));
     root.insert("chunk".into(), Value::Table(chunk));
 
     let mut extract = Table::new();
@@ -453,6 +477,10 @@ pub fn to_display_toml(cfg: &Config) -> String {
         Value::from(cfg.extract.pdftotext.clone()),
     );
     extract.insert("pdftoppm".into(), Value::from(cfg.extract.pdftoppm.clone()));
+    extract.insert(
+        "ffmpeg_dir".into(),
+        Value::from(cfg.extract.ffmpeg_dir.clone()),
+    );
     root.insert("extract".into(), Value::Table(extract));
 
     let mut files = Table::new();
@@ -615,6 +643,7 @@ const ENV_PATHS: &[&str] = &[
     "chunk.pdf.embed_text",
     "chunk.pdf.embed_page_image",
     "chunk.image.max_edge_px",
+    "chunk.audio.segment_secs",
     "extract.poppler_dir",
     "extract.pdfinfo",
     "extract.pdftotext",
@@ -666,6 +695,7 @@ fn coerce_env_value(path: &str, raw: &str) -> Result<Value> {
         | "chunk.pdf.first_pass_pages"
         | "chunk.pdf.render_dpi"
         | "chunk.image.max_edge_px" => Value::from(i64::from(parse_env::<u32>(path, raw)?)),
+        "chunk.audio.segment_secs" => Value::from(parse_env::<u64>(path, raw)? as i64),
         "embedder.timeout_ms" => Value::from(parse_env::<u64>(path, raw)? as i64),
         "search.default_limit"
         | "search.candidates"
@@ -785,6 +815,7 @@ struct RawChunk {
     text: RawTextChunk,
     pdf: RawPdfChunk,
     image: RawImageChunk,
+    audio: RawAudioChunk,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -815,11 +846,18 @@ struct RawImageChunk {
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
+struct RawAudioChunk {
+    segment_secs: Option<u64>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
 struct RawExtract {
     poppler_dir: Option<String>,
     pdfinfo: Option<String>,
     pdftotext: Option<String>,
     pdftoppm: Option<String>,
+    ffmpeg_dir: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -996,6 +1034,9 @@ fn build_config(raw: RawConfig, dirs: &FerretDirs) -> Result<Config> {
     if let Some(v) = raw.chunk.image.max_edge_px {
         cfg.chunk.image.max_edge_px = v;
     }
+    if let Some(v) = raw.chunk.audio.segment_secs {
+        cfg.chunk.audio.segment_secs = v;
+    }
 
     let x = raw.extract;
     if let Some(v) = x.poppler_dir {
@@ -1009,6 +1050,9 @@ fn build_config(raw: RawConfig, dirs: &FerretDirs) -> Result<Config> {
     }
     if let Some(v) = x.pdftoppm {
         cfg.extract.pdftoppm = v;
+    }
+    if let Some(v) = x.ffmpeg_dir {
+        cfg.extract.ffmpeg_dir = v;
     }
 
     let f = raw.files;
@@ -1105,6 +1149,11 @@ fn validate(cfg: &Config) -> Result<()> {
             "config: chunk.text.overlap ({}) must be less than chunk.text.max_chars ({})",
             cfg.chunk.text.overlap, cfg.chunk.text.max_chars
         )));
+    }
+    if cfg.chunk.audio.segment_secs == 0 {
+        return Err(Error::fatal(
+            "config: chunk.audio.segment_secs must be at least 1".to_string(),
+        ));
     }
     if !matches!(cfg.embedder.dimensions, 768 | 512 | 256 | 128) {
         return Err(Error::fatal(format!(

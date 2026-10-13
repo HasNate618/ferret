@@ -38,6 +38,7 @@ fn file(path: &str, kind: FileKind) -> NewFile {
         FileKind::Text => "txt",
         FileKind::Image => "png",
         FileKind::Pdf => "pdf",
+        FileKind::Audio => "wav",
     };
     NewFile {
         path: path.into(),

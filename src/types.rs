@@ -47,20 +47,24 @@ macro_rules! spec_enum {
 }
 
 spec_enum! {
-    /// v1 file kinds. Only `text`, `image`, and `pdf` exist in v1.
+    /// File kinds. v1 indexes `text`, `image`, and `pdf`; the audio
+    /// milestone adds `audio`.
     FileKind {
         Text => "text",
         Image => "image",
         Pdf => "pdf",
+        Audio => "audio",
     }
 }
 
 spec_enum! {
-    /// v1 chunk kinds. Only `text`, `image`, and `pdf_page` exist in v1.
+    /// Chunk kinds. The audio milestone adds `audio_segment` (one row per
+    /// ~30s clip, vec-only like images).
     ChunkKind {
         Text => "text",
         Image => "image",
         PdfPage => "pdf_page",
+        AudioSegment => "audio_segment",
     }
 }
 
@@ -138,13 +142,13 @@ mod tests {
 
     #[test]
     fn from_str_round_trips() {
-        for s in ["text", "image", "pdf"] {
+        for s in ["text", "image", "pdf", "audio"] {
             assert_eq!(FileKind::from_str(s).unwrap().to_string(), s);
         }
         for s in ["llama_server", "litert_lm", "sglang", "openai"] {
             assert_eq!(Backend::from_str(s).unwrap().to_string(), s);
         }
-        assert!(FileKind::from_str("audio").is_err());
+        assert!(FileKind::from_str("video").is_err());
         assert!(Backend::from_str("ollama").is_err());
     }
 }

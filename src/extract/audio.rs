@@ -101,7 +101,9 @@ fn is_executable_file(path: &Path) -> bool {
 /// 0.5s dropped). Clip bytes are loaded into `image_bytes` — the exact
 /// embedder payload, mirroring image chunks. Segment WAVs live under
 /// `cache_dir/audio/{hash}-{idx}.wav` (path-hash scoped, like the PDF raster
-/// dir); the caller deletes them after the file transaction commits.
+/// dir); each clip is removed right after it is read into memory — the
+/// bytes are the payload, the files are scratch, so success leaves
+/// nothing behind with no post-commit sweep.
 /// Undecodable input is `Error::file` (ffprobe/ffmpeg nonzero exits).
 pub fn extract_audio(
     path: &Path,

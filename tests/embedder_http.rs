@@ -329,3 +329,184 @@ fn llama_server_pdf_body_textless_page_has_empty_text_part() {
         .unwrap();
     mock.assert();
 }
+
+fn openai_cfg(endpoint: &str, dimensions: u32) -> Config {
+    let mut cfg = test_cfg(endpoint);
+    cfg.embedder.backend = Backend::Openai;
+    cfg.embedder.dimensions = dimensions;
+    cfg
+}
+
+fn sglang_cfg(endpoint: &str, dimensions: u32) -> Config {
+    let mut cfg = test_cfg(endpoint);
+    cfg.embedder.backend = Backend::Sglang;
+    cfg.embedder.dimensions = dimensions;
+    cfg
+}
+
+fn embedding_json(n: u32) -> serde_json::Value {
+    let mut v = vec![0.0f64; n as usize];
+    v[0] = 1.0;
+    serde_json::json!({ "data": [{ "embedding": v }] })
+}
+
+#[test]
+fn openai_query_sends_dimensions_when_not_768() {
+    // B.5 with dimensions: input is a plain prefixed string.
+    let server = httpmock::MockServer::start();
+    let mock = server.mock(|when, then| {
+        when.method("POST").path("/v1/embeddings").json_body(serde_json::json!({
+            "model": "embeddinggemma-2",
+            "encoding_format": "float",
+            "dimensions": 4,
+            "input": "task: search result | query: pets in the lease"
+        }));
+        then.status(200).json_body(embedding_json(4));
+    });
+    let cfg = openai_cfg(&server.base_url(), 4);
+    let e = HttpEmbedder::new(&cfg).unwrap();
+    let v = e
+        .embed(EmbedInput::Query {
+            text: "pets in the lease".into(),
+            task: QueryTask::Search,
+        })
+        .unwrap();
+    assert_eq!(v.len(), 4);
+    mock.assert();
+}
+
+#[test]
+fn openai_omits_dimensions_at_768() {
+    // Exact match without the key: sending it at 768 fails the mock.
+    let server = httpmock::MockServer::start();
+    let mock = server.mock(|when, then| {
+        when.method("POST").path("/v1/embeddings").json_body(serde_json::json!({
+            "model": "embeddinggemma-2",
+            "encoding_format": "float",
+            "input": "title: none | text: pets"
+        }));
+        then.status(200).json_body(embedding_json(768));
+    });
+    let cfg = openai_cfg(&server.base_url(), 768);
+    let e = HttpEmbedder::new(&cfg).unwrap();
+    let v = e.embed(doc_input("pets")).unwrap();
+    assert_eq!(v.len(), 768);
+    mock.assert();
+}
+
+#[test]
+fn openai_wrong_length_is_fatal() {
+    // A 256-d response in a 768-d index must fail, never store truncated.
+    let server = httpmock::MockServer::start();
+    let _mock = server.mock(|when, then| {
+        when.method("POST").path("/v1/embeddings");
+        then.status(200).json_body(embedding_json(256));
+    });
+    let cfg = openai_cfg(&server.base_url(), 768);
+    let e = HttpEmbedder::new(&cfg).unwrap();
+    let err = e.embed(doc_input("pets")).unwrap_err();
+    assert!(!err.is_file_error(), "dimension mismatch is fatal: {err}");
+}
+
+#[test]
+fn openai_image_file_never_posts() {
+    // backend=openai: images capability-skip before any embed, so no POST
+    // may contain an image part.
+    let server = httpmock::MockServer::start();
+    let image_posts = server.mock(|when, then| {
+        when.method("POST")
+            .path("/v1/embeddings")
+            .body_includes("image_url");
+        then.status(200).json_body(embedding_json(4));
+    });
+    let any_posts = server.mock(|when, then| {
+        when.method("POST").path("/v1/embeddings");
+        then.status(200).json_body(embedding_json(4));
+    });
+    let mut cfg = openai_cfg(&server.base_url(), 4);
+    cfg.embedder.multimodal = None;
+    let e = HttpEmbedder::new(&cfg).unwrap();
+    assert!(!e.images_supported(), "openai is text-only");
+    // Direct embed of an image input must also refuse to post.
+    let err = e
+        .embed(EmbedInput::Image {
+            bytes: b"PNG".to_vec(),
+            mime: "image/png".into(),
+        })
+        .unwrap_err();
+    assert!(err.is_file_error(), "openai image is per-file: {err}");
+    assert_eq!(image_posts.calls(), 0, "no image part may post to openai");
+    let _ = any_posts;
+}
+
+#[test]
+fn openai_pdf_page_embeds_as_text_only_document() {
+    // Even with embed_page_image on: no image part, Document text only.
+    let server = httpmock::MockServer::start();
+    let mock = server.mock(|when, then| {
+        when.method("POST").path("/v1/embeddings").json_body(serde_json::json!({
+            "model": "embeddinggemma-2",
+            "encoding_format": "float",
+            "dimensions": 4,
+            "input": "title: none | text: page one pets"
+        }));
+        then.status(200).json_body(embedding_json(4));
+    });
+    let cfg = openai_cfg(&server.base_url(), 4);
+    let e = HttpEmbedder::new(&cfg).unwrap();
+    let v = e
+        .embed(EmbedInput::PdfPage {
+            image_png: b"PNG".to_vec(),
+            text: Some("page one pets".to_string()),
+        })
+        .unwrap();
+    assert_eq!(v.len(), 4);
+    mock.assert();
+}
+
+#[test]
+fn sglang_pdf_uses_image_marker() {
+    // Frozen B.4: text starts with "<|image|>\n", image is a data URI.
+    let server = httpmock::MockServer::start();
+    let mock = server.mock(|when, then| {
+        when.method("POST").path("/v1/embeddings").json_body(serde_json::json!({
+            "model": "embeddinggemma-2",
+            "encoding_format": "float",
+            "dimensions": 4,
+            "input": [{
+                "text": "<|image|>\ntitle: none | text: page one pets",
+                "image": "data:image/png;base64,QUJD"
+            }]
+        }));
+        then.status(200).json_body(embedding_json(4));
+    });
+    let cfg = sglang_cfg(&server.base_url(), 4);
+    let e = HttpEmbedder::new(&cfg).unwrap();
+    let v = e
+        .embed(EmbedInput::PdfPage {
+            image_png: b"ABC".to_vec(),
+            text: Some("page one pets".to_string()),
+        })
+        .unwrap();
+    assert_eq!(v.len(), 4);
+    mock.assert();
+}
+
+#[test]
+fn sglang_text_item_sends_dimensions_when_not_768() {
+    // Text items carry {text}; dimensions only when != 768.
+    let server = httpmock::MockServer::start();
+    let mock = server.mock(|when, then| {
+        when.method("POST").path("/v1/embeddings").json_body(serde_json::json!({
+            "model": "embeddinggemma-2",
+            "encoding_format": "float",
+            "dimensions": 4,
+            "input": [{ "text": "title: none | text: pets" }]
+        }));
+        then.status(200).json_body(embedding_json(4));
+    });
+    let cfg = sglang_cfg(&server.base_url(), 4);
+    let e = HttpEmbedder::new(&cfg).unwrap();
+    let _ = e.embed(doc_input("pets")).unwrap();
+    mock.assert();
+}

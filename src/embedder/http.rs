@@ -82,6 +82,118 @@ impl HttpEmbedder {
         parse_embedding(resp)
     }
 
+    /// llama_server / litert_lm text+image dialect (Appendices B.1–B.3).
+    fn embed_llama(&self, input: EmbedInput) -> Result<Vec<f32>> {
+        let sized = match &input {
+            // Appendix B.2: the data-URL part is the whole input; no text
+            // prefix of any kind.
+            EmbedInput::Image { bytes, .. } => {
+                let raw = self.post_image(bytes)?;
+                truncate_or_check(raw, self.backend, self.dimensions)?
+            }
+            // Appendix B.3: image part first, then the Document-prefixed
+            // page text (empty string when the page has no text).
+            EmbedInput::PdfPage { image_png, text } => {
+                let raw = self.post_pdf_page(image_png, text.as_deref())?;
+                truncate_or_check(raw, self.backend, self.dimensions)?
+            }
+            _ => match apply_prefix(self.profile, &input) {
+                Some(t) => {
+                    let raw = self.post_text(&t)?;
+                    truncate_or_check(raw, self.backend, self.dimensions)?
+                }
+                None => {
+                    return Err(Error::fatal(
+                        "internal error: unprefixable input reached llama embed",
+                    ));
+                }
+            },
+        };
+        Ok(sized)
+    }
+
+    /// `dimensions` is sent only when it differs from 768 (Appendix B.5).
+    fn maybe_dimensions(&self) -> Option<u32> {
+        (self.dimensions != 768).then_some(self.dimensions)
+    }
+
+    /// openai dialect (Appendix B.5): prefixed strings only, never image
+    /// parts. Image inputs refuse to post (per-file); PDF pages embed as
+    /// text-only Documents even when page images were rendered.
+    fn embed_openai(&self, input: EmbedInput) -> Result<Vec<f32>> {
+        let text = match &input {
+            EmbedInput::Image { .. } => {
+                return Err(Error::file(
+                    "openai embeddings are text-only; image skipped",
+                ));
+            }
+            EmbedInput::PdfPage { text, .. } => prefixed_or_empty(self.profile, text.as_deref()),
+            _ => match apply_prefix(self.profile, &input) {
+                Some(t) => t,
+                None => {
+                    return Err(Error::fatal(
+                        "internal error: unprefixable input reached openai embed",
+                    ));
+                }
+            },
+        };
+        let mut body = serde_json::json!({
+            "model": self.cfg.embedder.model,
+            "encoding_format": "float",
+            "input": text,
+        });
+        if let Some(d) = self.maybe_dimensions() {
+            body["dimensions"] = d.into();
+        }
+        let resp = self.post_with_retries(&probe::embeddings_url(&self.cfg), &body)?;
+        let raw = parse_embedding(resp)?;
+        truncate_or_check(raw, self.backend, self.dimensions)
+    }
+
+    /// sglang dialect (Appendix B.4): `{text, image}` items, one image per
+    /// item. The PDF text carries the `<|image|>` marker first, then the
+    /// Document-prefixed page text (marker alone when textless).
+    fn embed_sglang(&self, input: EmbedInput) -> Result<Vec<f32>> {
+        let item = match &input {
+            EmbedInput::PdfPage { image_png, text } => {
+                let prefixed = prefixed_or_empty(self.profile, text.as_deref());
+                let text = if prefixed.is_empty() {
+                    "<|image|>".to_string()
+                } else {
+                    format!("<|image|>\n{prefixed}")
+                };
+                serde_json::json!({
+                    "text": text,
+                    "image": data_uri(image_png),
+                })
+            }
+            EmbedInput::Image { bytes, .. } => {
+                // Standalone image: both keys, empty text (best-effort —
+                // no live sglang server exists to freeze this further).
+                serde_json::json!({ "text": "", "image": data_uri(bytes) })
+            }
+            _ => match apply_prefix(self.profile, &input) {
+                Some(t) => serde_json::json!({ "text": t }),
+                None => {
+                    return Err(Error::fatal(
+                        "internal error: unprefixable input reached sglang embed",
+                    ));
+                }
+            },
+        };
+        let mut body = serde_json::json!({
+            "model": self.cfg.embedder.model,
+            "encoding_format": "float",
+            "input": [item],
+        });
+        if let Some(d) = self.maybe_dimensions() {
+            body["dimensions"] = d.into();
+        }
+        let resp = self.post_with_retries(&probe::embeddings_url(&self.cfg), &body)?;
+        let raw = parse_embedding(resp)?;
+        truncate_or_check(raw, self.backend, self.dimensions)
+    }
+
     /// POST with the frozen retry policy: 429 / 503 / transport failure
     /// retry after 200/400/800ms (at most 4 attempts); other 4xx return a
     /// per-file error immediately; other 5xx are fatal without retry.
@@ -132,39 +244,14 @@ impl HttpEmbedder {
 
 impl Embedder for HttpEmbedder {
     fn embed(&self, input: EmbedInput) -> Result<Vec<f32>> {
-        match self.backend {
-            Backend::Openai | Backend::Sglang => {
-                return Err(Error::fatal(format!(
-                    "embedder.backend `{}` needs Task 16 (openai/sglang client)",
-                    self.backend,
-                )));
-            }
-            Backend::LlamaServer | Backend::LitertLm => {}
-        }
-        let sized = match &input {
-            // Appendix B.2: the data-URL part is the whole input; no text
-            // prefix of any kind.
-            EmbedInput::Image { bytes, .. } => {
-                let raw = self.post_image(bytes)?;
-                truncate_or_check(raw, self.backend, self.dimensions)?
-            }
-            // Appendix B.3: image part first, then the Document-prefixed
-            // page text (empty string when the page has no text).
-            EmbedInput::PdfPage { image_png, text } => {
-                let raw = self.post_pdf_page(image_png, text.as_deref())?;
-                truncate_or_check(raw, self.backend, self.dimensions)?
-            }
-            _ => match apply_prefix(self.profile, &input) {
-                Some(t) => {
-                    let raw = self.post_text(&t)?;
-                    truncate_or_check(raw, self.backend, self.dimensions)?
-                }
-                None => {
-                    return Err(Error::file(
-                        "PDF page embeddings need Task 15 (per-page transactions)",
-                    ));
-                }
-            },
+        // One shared tail: every backend returns exactly `dimensions`
+        // finite f32s (llama/litert truncate long tails; openai/sglang
+        // must match exactly or the call fails — never store a short
+        // vector in a wide index), then ferret L2-normalizes unconditionally.
+        let sized = match self.backend {
+            Backend::Openai => self.embed_openai(input)?,
+            Backend::Sglang => self.embed_sglang(input)?,
+            Backend::LlamaServer | Backend::LitertLm => self.embed_llama(input)?,
         };
         // The server may not L2-normalize: always normalize what we store.
         l2_normalize(sized)
@@ -235,6 +322,29 @@ pub(crate) fn pdf_page_body(
             { "type": "text", "text": prefixed },
         ] }],
     })
+}
+
+/// `data:image/png;base64,…` URI for one PNG's bytes.
+fn data_uri(png: &[u8]) -> String {
+    use base64::Engine as _;
+    format!(
+        "data:image/png;base64,{}",
+        base64::engine::general_purpose::STANDARD.encode(png)
+    )
+}
+
+/// The profile's Document-prefixed text, or `""` when there is none.
+fn prefixed_or_empty(profile: crate::types::PrefixProfile, text: Option<&str>) -> String {
+    text.and_then(|t| {
+        apply_prefix(
+            profile,
+            &EmbedInput::Document {
+                title: None,
+                text: t.to_string(),
+            },
+        )
+    })
+    .unwrap_or_default()
 }
 
 /// True when a response value carries a `data[0].embedding` array.

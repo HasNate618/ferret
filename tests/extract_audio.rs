@@ -60,11 +60,7 @@ fn non_executable_decoy_on_path_is_skipped() {
     std::fs::create_dir_all(&second).unwrap();
     std::fs::write(first.join("ffmpeg"), "not executable").unwrap();
     write_stub(&second, "ffmpeg", "exit 0");
-    let path = format!(
-        "{}:{}",
-        first.to_str().unwrap(),
-        second.to_str().unwrap()
-    );
+    let path = format!("{}:{}", first.to_str().unwrap(), second.to_str().unwrap());
     let _guard = EnvGuard::set("PATH", &path);
     assert_eq!(find_ffmpeg(None).unwrap(), second.join("ffmpeg"));
 }
@@ -144,7 +140,9 @@ fn audio_duration_zero_and_nan_are_file_errors() {
         let clip = tmp.path().join("clip.wav");
         std::fs::write(&clip, b"RIFF").unwrap();
         assert!(
-            audio_duration(Some(tools.as_path()), &clip).unwrap_err().is_file_error(),
+            audio_duration(Some(tools.as_path()), &clip)
+                .unwrap_err()
+                .is_file_error(),
             "output {output:?} should be a file error"
         );
     }

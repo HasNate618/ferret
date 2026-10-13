@@ -173,7 +173,7 @@ Extractors never embed. They return chunks. Index embeds each chunk.
 | `text` | `.txt .md .markdown .rst .org .html .htm .csv` plus source: `.rs .go .py .js .ts .tsx .jsx .c .h .cpp .java .sh .toml .yaml .yml .json .nix .lua .css .svg` (svg as text) | Sliding windows of text |
 | `image` | `.jpg .jpeg .png .webp .gif .bmp`; `.heic .heif` only when `files.heic = "magick"` | One image chunk |
 | `pdf` | `.pdf` | One chunk per page |
-| `audio` | `.mp3 .wav .flac .ogg .opus .m4a .aac` | One chunk per ~30s segment (`chunk.audio.segment_secs`), 16kHz mono WAV |
+| `audio` | `.mp3 .wav .flac .ogg .opus .m4a .aac` | One chunk per ~30s segment (`chunk.audio.segment_secs`), 16kHz mono WAV (see B.6) |
 
 Unknown extensions are **walk-skip** (no new `files` row) unless the user adds them via `[files.extension_kind]`. If that path is already in the DB, `index` **deletes** it (same as a skip-rule tombstone).
 

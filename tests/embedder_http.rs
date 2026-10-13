@@ -759,7 +759,9 @@ fn openai_audio_is_file_error_without_posting() {
     cfg.embedder.backend = Backend::Openai;
     let e = HttpEmbedder::new(&cfg).unwrap();
     let err = e
-        .embed(EmbedInput::Audio { wav_bytes: vec![1, 2, 3] })
+        .embed(EmbedInput::Audio {
+            wav_bytes: vec![1, 2, 3],
+        })
         .unwrap_err();
     assert!(err.is_file_error());
     mock.assert_hits(0);
@@ -778,9 +780,14 @@ fn sglang_and_litert_audio_are_file_errors_without_posting() {
         cfg.embedder.backend = backend;
         let e = HttpEmbedder::new(&cfg).unwrap();
         let err = e
-            .embed(EmbedInput::Audio { wav_bytes: vec![1, 2, 3] })
+            .embed(EmbedInput::Audio {
+                wav_bytes: vec![1, 2, 3],
+            })
             .unwrap_err();
-        assert!(err.is_file_error(), "backend {backend:?} should refuse audio");
+        assert!(
+            err.is_file_error(),
+            "backend {backend:?} should refuse audio"
+        );
         mock.assert_hits(0);
     }
 }

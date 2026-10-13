@@ -76,10 +76,7 @@ fn config_fingerprint_value(cfg: &Config, images_supported: bool) -> Value {
             .collect(),
     );
     object(vec![
-        (
-            "audio_pipeline".into(),
-            audio_pipeline_value(cfg),
-        ),
+        ("audio_pipeline".into(), audio_pipeline_value(cfg)),
         (
             "backend".into(),
             Value::String(cfg.embedder.backend.to_string()),

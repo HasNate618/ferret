@@ -352,10 +352,16 @@ fn kind_audio_returns_only_audio() {
         kind: vec![FileKind::Audio],
         ..Default::default()
     };
-    assert_eq!(search(&h, "sine tone", &audio_flags), vec!["/x/sweep.wav".to_string()]);
+    assert_eq!(
+        search(&h, "sine tone", &audio_flags),
+        vec!["/x/sweep.wav".to_string()]
+    );
     let text_flags = FilterFlags {
         kind: vec![FileKind::Text],
         ..Default::default()
     };
-    assert_eq!(search(&h, "sine tone", &text_flags), vec!["/x/doc.txt".to_string()]);
+    assert_eq!(
+        search(&h, "sine tone", &text_flags),
+        vec!["/x/doc.txt".to_string()]
+    );
 }

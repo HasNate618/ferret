@@ -523,9 +523,8 @@ impl Store {
                 |r| r.get(0),
             )?;
             if missing == 0 {
-                self.conn.execute_batch(&format!(
-                    "ALTER TABLE chunks ADD COLUMN {col} INTEGER"
-                ))?;
+                self.conn
+                    .execute_batch(&format!("ALTER TABLE chunks ADD COLUMN {col} INTEGER"))?;
             }
         }
         Ok(())

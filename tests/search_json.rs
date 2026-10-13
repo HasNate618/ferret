@@ -397,7 +397,15 @@ fn audio_fixture() -> (Store, Config, FakeEmbedder) {
         )
         .unwrap();
     store
-        .insert_vec(&tx, chunk_id, &embedding, FileKind::Audio, "wav", MTIME, "Documents")
+        .insert_vec(
+            &tx,
+            chunk_id,
+            &embedding,
+            FileKind::Audio,
+            "wav",
+            MTIME,
+            "Documents",
+        )
         .unwrap();
     // Second segment with no end timestamp: renders `[mm:ss–?]`.
     let chunk2 = store
@@ -417,7 +425,15 @@ fn audio_fixture() -> (Store, Config, FakeEmbedder) {
         )
         .unwrap();
     store
-        .insert_vec(&tx, chunk2, &embedding, FileKind::Audio, "wav", MTIME, "Documents")
+        .insert_vec(
+            &tx,
+            chunk2,
+            &embedding,
+            FileKind::Audio,
+            "wav",
+            MTIME,
+            "Documents",
+        )
         .unwrap();
     tx.commit().unwrap();
     KEEP.with(|k| k.borrow_mut().push(dir));
@@ -439,14 +455,9 @@ fn search_returns_timestamped_audio_hits() {
     let v: serde_json::Value = serde_json::from_str(&render_json(&out)).unwrap();
     let hits = v["hits"].as_array().unwrap();
     assert!(!hits.is_empty());
+    assert!(hits.iter().all(|h| h["chunk_kind"] == "audio_segment"));
     assert!(
-        hits
-            .iter()
-            .all(|h| h["chunk_kind"] == "audio_segment")
-    );
-    assert!(
-        hits
-            .iter()
+        hits.iter()
             .all(|h| h["page"].is_null() && h["snippet_spans"] == serde_json::json!([]))
     );
     assert!(hits.iter().all(|h| h["scores"]["fts"].is_null()));

@@ -395,7 +395,10 @@ fn audio_kinds_parse_and_display() {
 fn compiled_defaults_include_audio() {
     let c = compiled_defaults(&dirs());
     for ext in ["mp3", "wav", "flac", "ogg", "opus", "m4a", "aac"] {
-        assert_eq!(c.files.extension_kind.get(ext), Some(&ferret::types::FileKind::Audio));
+        assert_eq!(
+            c.files.extension_kind.get(ext),
+            Some(&ferret::types::FileKind::Audio)
+        );
     }
     assert_eq!(c.chunk.audio.segment_secs, 30);
     assert!(c.extract.ffmpeg_dir.is_empty());
@@ -409,11 +412,19 @@ fn zero_segment_secs_is_fatal() {
         "[chunk.audio]\nsegment_secs = 0\n".into(),
     )]);
     let err = load_from(
-        &LoadOpts { config_flag: None, index_flag: None },
+        &LoadOpts {
+            config_flag: None,
+            index_flag: None,
+        },
         &dirs(),
         &|_| None,
         Path::new("/tmp/cwd"),
-        &|p| files.get(p).cloned().ok_or_else(|| ferret::error::Error::fatal("missing")),
+        &|p| {
+            files
+                .get(p)
+                .cloned()
+                .ok_or_else(|| ferret::error::Error::fatal("missing"))
+        },
     )
     .unwrap_err();
     assert!(err.to_string().contains("segment_secs"));
@@ -422,7 +433,10 @@ fn zero_segment_secs_is_fatal() {
 #[test]
 fn env_overrides_audio_and_ffmpeg_dir() {
     let (c, _) = load_from(
-        &LoadOpts { config_flag: None, index_flag: None },
+        &LoadOpts {
+            config_flag: None,
+            index_flag: None,
+        },
         &dirs(),
         &|k| match k {
             "FERRET__CHUNK__AUDIO__SEGMENT_SECS" => Some("45".into()),

@@ -4,8 +4,8 @@ mod common;
 
 use ferret::config::{Config, compiled_defaults};
 use ferret::store::{self, NewChunk, NewFile, Store};
-use rusqlite;
 use ferret::types::{Backend, ChunkKind, FileKind, PrefixProfile};
+use rusqlite;
 use std::cell::RefCell;
 use std::path::PathBuf;
 

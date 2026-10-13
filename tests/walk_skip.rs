@@ -261,11 +261,25 @@ fn heic_magick_mode_types_unmapped_heic_as_image() {
     )));
 }
 
-/// Host capability gate (`find_magick` is `pub(crate)`).
+/// Host capability gate (mirrors `find_magick`: non-empty PATH entry +
+/// executable bit).
 fn host_has_magick() -> bool {
+    #[cfg(unix)]
+    fn is_exec(p: &std::path::Path) -> bool {
+        use std::os::unix::fs::PermissionsExt;
+        p.is_file()
+            && p.metadata()
+                .is_ok_and(|m| m.permissions().mode() & 0o111 != 0)
+    }
+    #[cfg(not(unix))]
+    fn is_exec(p: &std::path::Path) -> bool {
+        p.is_file()
+    }
     std::env::var_os("PATH").is_some_and(|paths| {
-        std::env::split_paths(&paths).any(|dir| {
-            ["magick", "convert"].iter().any(|bin| dir.join(bin).is_file())
-        })
+        std::env::split_paths(&paths)
+            .filter(|dir| !dir.as_os_str().is_empty())
+            .any(|dir| {
+                ["magick", "convert"].iter().any(|bin| is_exec(&dir.join(bin)))
+            })
     })
 }

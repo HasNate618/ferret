@@ -279,3 +279,40 @@ fn api_key_file_mode_0644_is_fatal() {
     .unwrap();
     assert!(ferret::config::to_display_toml(&c).contains("api_key = \"***\""));
 }
+
+#[test]
+fn env_max_size_accepts_bare_digits_and_suffixes() {
+    for (raw, want) in [
+        ("52428800", 52428800u64),
+        ("40MiB", 40 * 1024 * 1024),
+        ("2KiB", 2048),
+    ] {
+        let (c, _) = load_from(
+            &LoadOpts { config_flag: None, index_flag: None },
+            &dirs(),
+            &|k| (k == "FERRET__FILES__MAX_SIZE").then(|| raw.into()),
+            Path::new("/tmp/cwd"),
+            &|_| Err(ferret::error::Error::fatal("no files")),
+        )
+        .unwrap();
+        assert_eq!(c.files.max_size, want, "for FERRET__FILES__MAX_SIZE={raw}");
+    }
+}
+
+#[test]
+fn root_slash_shorthand_gets_nonempty_collection() {
+    let files: HashMap<PathBuf, String> = HashMap::from([(
+        PathBuf::from("/tmp/ferret-cfg/config.toml"),
+        "[index]\nroots = [\"/\"]\n".into(),
+    )]);
+    let (c, _) = load_from(
+        &LoadOpts { config_flag: None, index_flag: None },
+        &dirs(),
+        &|_| None,
+        Path::new("/tmp/cwd"),
+        &|p| files.get(p).cloned().ok_or_else(|| ferret::error::Error::fatal("missing")),
+    )
+    .unwrap();
+    assert_eq!(c.index.roots.len(), 1);
+    assert!(!c.index.roots[0].collection.is_empty());
+}

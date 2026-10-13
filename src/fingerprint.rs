@@ -27,19 +27,19 @@ pub fn config_fingerprint(cfg: &Config, images_supported: bool) -> String {
 
 /// Canonical Appendix A JSON (compact, sorted keys, exact field set).
 pub fn config_fingerprint_json(cfg: &Config, images_supported: bool) -> String {
-    to_string(config_fingerprint_value(cfg, images_supported))
+    to_canonical_json(config_fingerprint_value(cfg, images_supported))
 }
 
 /// The text half of the fingerprint, standalone for store meta: everything
 /// that changes text chunking or PDF text embedding.
 pub fn text_pipeline_json(cfg: &Config) -> String {
-    to_string(text_pipeline_value(cfg))
+    to_canonical_json(text_pipeline_value(cfg))
 }
 
 /// The image half of the fingerprint, standalone for store meta: everything
 /// that changes image handling or PDF page-image rendering.
 pub fn image_pipeline_json(cfg: &Config, images_supported: bool) -> String {
-    to_string(image_pipeline_value(cfg, images_supported))
+    to_canonical_json(image_pipeline_value(cfg, images_supported))
 }
 
 /// `blake3(canonical_path || 0x1f || mtime || 0x1f || size || 0x1f ||
@@ -128,7 +128,7 @@ fn object(entries: Vec<(String, Value)>) -> Value {
     Value::Object(Map::from_iter(sorted))
 }
 
-fn to_string(value: Value) -> String {
+fn to_canonical_json(value: Value) -> String {
     value.to_string()
 }
 

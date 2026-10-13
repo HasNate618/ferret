@@ -6,6 +6,9 @@
 //! special test hook read by `embedder::build_embedder` via its `env`
 //! parameter, never here.
 
+/// System config layer path (also referenced by `config path` output).
+pub const SYSTEM_CONFIG_PATH: &str = "/etc/ferret/config.toml";
+
 use crate::error::{Error, Result};
 use crate::paths::{ferret_dirs, FerretDirs, INDEX_FILENAME};
 use crate::types::{Backend, FileKind, HeicMode, PrefixProfile, SearchMode, TextChunkMode};
@@ -165,7 +168,7 @@ pub fn load_from(
     let mut merged = Table::new();
 
     // Skippable: read error means the layer is absent.
-    let etc = Path::new("/etc/ferret/config.toml");
+    let etc = Path::new(SYSTEM_CONFIG_PATH);
     if let Some(table) = read_layer(etc, read, false)? {
         deep_merge(&mut merged, table);
         layers.push(LayerSource::Etc);
@@ -458,15 +461,19 @@ fn check_api_key_mode(path: &Path, table: &Table) -> Result<()> {
             .is_some_and(|s| !s.is_empty());
         if has_key {
             use std::os::unix::fs::PermissionsExt;
-            if let Ok(md) = std::fs::metadata(path) {
-                let mode = md.permissions().mode();
-                if mode & 0o077 != 0 {
-                    return Err(Error::fatal(format!(
-                        "config `{}` contains api_key but is mode {:o}; chmod 600 it",
-                        path.display(),
-                        mode & 0o777
-                    )));
-                }
+            let md = std::fs::metadata(path).map_err(|e| {
+                Error::fatal(format!(
+                    "config `{}` holds api_key but is unreadable: {e}",
+                    path.display()
+                ))
+            })?;
+            let mode = md.permissions().mode();
+            if mode & 0o077 != 0 {
+                return Err(Error::fatal(format!(
+                    "config `{}` contains api_key but is mode {:o}; chmod 600 it",
+                    path.display(),
+                    mode & 0o777
+                )));
             }
         }
     }
@@ -757,6 +764,10 @@ fn parse_size(spec: SizeSpec) -> Result<u64> {
         SizeSpec::Bytes(n) => Ok(n),
         SizeSpec::Human(s) => {
             let s = s.trim();
+            // Bare digits are integer bytes (the error below promises it).
+            if let Ok(n) = s.parse::<u64>() {
+                return Ok(n);
+            }
             for (suffix, mult) in [
                 ("KiB", 1024u64),
                 ("MiB", 1024 * 1024),
@@ -959,10 +970,12 @@ fn build_roots(spec: RootSpec) -> Result<Vec<RootEntry>> {
             .map(|p| {
                 let expanded = expand_tilde(p);
                 let path = std::fs::canonicalize(&expanded).unwrap_or(expanded);
+                // `/` has no file name; fall back to the full path so the
+                // collection is never empty (mirrors `init`).
                 let collection = path
                     .file_name()
                     .map(|n| n.to_string_lossy().into_owned())
-                    .unwrap_or_default();
+                    .unwrap_or_else(|| path.to_string_lossy().into_owned());
                 RootEntry { path, collection }
             })
             .collect::<Vec<_>>(),

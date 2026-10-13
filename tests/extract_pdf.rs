@@ -108,6 +108,8 @@ fn poppler_dir_is_preferred_over_path() {
 }
 
 /// Write an executable shell stub: `name` echoes `stdout` and exits 0.
+/// fsyncs file and directory: executing a just-written script can hit
+/// ETXTBSY ("Text file busy") on some filesystems otherwise.
 fn write_stub(dir: &Path, name: &str, stdout: &str) {
     let path = dir.join(name);
     std::fs::write(&path, format!("#!/bin/sh\nprintf '%s' \"{stdout}\"\n")).unwrap();
@@ -118,6 +120,11 @@ fn write_stub(dir: &Path, name: &str, stdout: &str) {
         perms.set_mode(0o755);
         std::fs::set_permissions(&path, perms).unwrap();
     }
+    let file = std::fs::File::open(&path).unwrap();
+    file.sync_all().unwrap();
+    drop(file);
+    let dir_fd = std::fs::File::open(dir).unwrap();
+    dir_fd.sync_all().unwrap();
 }
 
 #[test]

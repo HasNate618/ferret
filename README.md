@@ -103,8 +103,8 @@ schema/model mismatch, `--strict` with errors); `2` usage.
 or one NDJSON `{"event":"file",…}` object per file on stdout with
 `--json`. Statuses: `ok`, `skip` (with `reason`: `unsupported_ext`,
 `skip_rule`, `no_image_backend`, `heic_skip`, `no_magick`,
-`gitignore`, `include_globs`), `error` (with message; `complete=0`,
-walk continues).
+`gitignore`, `include_globs`), `error` (with message; the DB row is
+`complete=0`, walk continues).
 
 ## Search JSON contract (frozen)
 
@@ -155,6 +155,7 @@ Layers, weakest to strongest: compiled defaults → `/etc/ferret/`
 result (`api_key` redacted); `init` never writes `api_key`.
 
 ```toml
+# Common keys (see `ferret config show` for the full merged result).
 [index]
 roots = ["/home/nate/notes"]   # collection = last path component
 # path = "/custom/index.sqlite"
@@ -168,12 +169,13 @@ prefix_profile = "embeddinggemma2"  # or litert_lm (must match backend family)
 # multimodal = true            # override the 1x1-PNG image probe
 managed = false                # spawn llama-server when down
 # gguf = ""  mmproj = ""       # managed-mode weights
-# batch_size = 8  timeout_ms = 30000  api_key = ""
+# batch_size = 8  timeout_ms = 120000  api_key = ""
 
 [chunk.text]
-mode = "sentences"             # or chars
+mode = "chars"                   # or "sentences"
 max_chars = 2000
 overlap = 200
+# skip_letterless = true  numeric_heavy = 0.7
 
 [chunk.pdf]
 max_pages = 5000
@@ -187,7 +189,7 @@ max_edge_px = 1024
 
 [files]
 heic = "skip"                  # or "magick" (needs ImageMagick)
-max_size = 52428800
+max_size = 41943040             # 40MiB; integer bytes or KiB/MiB/GiB
 # follow_symlinks, include_hidden, respect_gitignore,
 # include_globs, exclude_globs, extension_kind …
 ```
@@ -216,6 +218,9 @@ PDF pages; `images_supported` flips re-embed affected files.
 
 ```nix
 {
+  # The module's default package is `pkgs.ferret`, which only exists
+  # if this flake's overlay is wired in:
+  nixpkgs.overlays = [ inputs.ferret.overlays.default ];
   services.ferret = {
     enable = true;
     settings.index.roots = [ "/home/alice/notes" ];

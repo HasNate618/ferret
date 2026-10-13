@@ -140,10 +140,12 @@ mod tests {
 
     #[test]
     fn textless_pdf_page_has_no_text_prefix() {
-        let s = apply_prefix(
-            PrefixProfile::EmbeddingGemma2,
-            &EmbedInput::PdfPage { image_png: vec![1], text: None },
-        );
-        assert!(s.is_none());
+        for profile in [PrefixProfile::EmbeddingGemma2, PrefixProfile::LitertLm] {
+            let s = apply_prefix(
+                profile,
+                &EmbedInput::PdfPage { image_png: vec![1], text: None },
+            );
+            assert!(s.is_none());
+        }
     }
 }

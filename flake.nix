@@ -14,7 +14,7 @@
           ferret = pkgs.rustPlatform.buildRustPackage {
             pname = "ferret";
             version = "0.1.0";
-            src = ./.;
+            src = pkgs.lib.cleanSource ./.;
             cargoLock.lockFile = ./Cargo.lock;
             nativeBuildInputs = [ pkgs.pkg-config pkgs.makeWrapper ];
             # reqwest loads the native CA bundle at Client::build() time

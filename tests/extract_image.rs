@@ -122,11 +122,24 @@ fn heic_magick_mode_converts_with_binary_present() {
 }
 
 /// Host capability gate for the conversion test (`find_magick` is
-/// `pub(crate)`, so the test does its own minimal executable lookup).
+/// `pub(crate)`; mirrors its executable-bit predicate).
 fn host_has_magick() -> bool {
+    #[cfg(unix)]
+    fn is_exec(p: &std::path::Path) -> bool {
+        use std::os::unix::fs::PermissionsExt;
+        p.is_file()
+            && p.metadata()
+                .is_ok_and(|m| m.permissions().mode() & 0o111 != 0)
+    }
+    #[cfg(not(unix))]
+    fn is_exec(p: &std::path::Path) -> bool {
+        p.is_file()
+    }
     std::env::var_os("PATH").is_some_and(|paths| {
-        std::env::split_paths(&paths).any(|dir| {
-            ["magick", "convert"].iter().any(|bin| dir.join(bin).is_file())
-        })
+        std::env::split_paths(&paths)
+            .filter(|dir| !dir.as_os_str().is_empty())
+            .any(|dir| {
+                ["magick", "convert"].iter().any(|bin| is_exec(&dir.join(bin)))
+            })
     })
 }

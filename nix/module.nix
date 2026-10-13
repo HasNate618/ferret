@@ -29,7 +29,7 @@ in {
       type = lib.types.bool;
       default = false;
       description = ''
-        Put ImageMagick (`magick`/`convert`) on ferret's PATH so
+        Adds ImageMagick (`magick`/`convert`) to the system PATH so
         `files.heic = "magick"` can convert HEIC/HEIF. Off by default:
         the default package only wraps poppler-utils.
       '';

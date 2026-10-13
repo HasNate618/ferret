@@ -588,7 +588,7 @@ fn config_path(opts: &LoadOpts, stdout: &mut dyn Write) -> Result<()> {
     let (_cfg, layers) = load_with_layers(opts)?;
     for layer in &layers {
         let path = match layer {
-            LayerSource::Etc => Some(Path::new("/etc/ferret/config.toml")),
+            LayerSource::Etc => Some(Path::new(crate::config::SYSTEM_CONFIG_PATH)),
             LayerSource::UserFile(p) | LayerSource::CwdFile(p) => Some(p.as_path()),
             LayerSource::Defaults | LayerSource::Env | LayerSource::Flags => None,
         };

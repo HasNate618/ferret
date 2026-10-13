@@ -124,6 +124,10 @@ pub fn extract_audio(
     let tag = &hash[..16.min(hash.len())];
 
     let mut chunks = Vec::new();
+    // Clips cut before an error: removed on failure so a failed file
+    // leaves no partials (success-path retention + post-commit deletion
+    // is the caller's job).
+    let mut written: Vec<PathBuf> = Vec::new();
     let mut start = 0.0;
     let mut idx = 0u32;
     while start < duration {
@@ -161,6 +165,7 @@ pub fn extract_audio(
             .map_err(|e| Error::file(format!("could not run {}: {e}", ffmpeg.display())))?;
         let clip = stem.with_extension("wav");
         if !out.status.success() || !clip.is_file() {
+            clean_partials(&written);
             return Err(Error::file(format!(
                 "ffmpeg failed for {} offset {start}s (exited {})",
                 path.display(),
@@ -168,8 +173,10 @@ pub fn extract_audio(
             )));
         }
         let bytes = std::fs::read(&clip).map_err(|e| {
+            clean_partials(&written);
             Error::file(format!("cannot read segment {}: {e}", clip.display()))
         })?;
+        written.push(clip);
         chunks.push(Chunk {
             kind: ChunkKind::AudioSegment,
             text: None,
@@ -185,4 +192,13 @@ pub fn extract_audio(
         idx += 1;
     }
     Ok(chunks)
+}
+
+/// Best-effort removal of clips cut before a failure; errors ignored
+/// (the cache is scratch space, and a failed unlink must not mask the
+/// real error).
+fn clean_partials(written: &[PathBuf]) {
+    for p in written {
+        let _ = std::fs::remove_file(p);
+    }
 }

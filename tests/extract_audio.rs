@@ -199,3 +199,30 @@ fn corrupt_wav_is_file_error() {
     let err = extract_audio(&bad, 30, &tmp.path().join("cache"), None).unwrap_err();
     assert!(err.is_file_error());
 }
+
+#[test]
+#[serial]
+fn failed_segment_removes_earlier_clips() {
+    use ferret::extract::audio::extract_audio;
+    let tmp = tmpdir();
+    let tools = tmp.path().join("tools");
+    std::fs::create_dir_all(&tools).unwrap();
+    // 65s duration so three segments are attempted.
+    write_stub(&tools, "ffprobe", "printf '65'");
+    // First ffmpeg call writes a fake clip and succeeds; later calls fail.
+    // The output path is the last argv; the call count rides an env var.
+    write_stub(
+        &tools,
+        "ffmpeg",
+        "n=$(cat \"$AUDIO_STUB_COUNT\" 2>/dev/null || echo 0); echo $((n + 1)) > \"$AUDIO_STUB_COUNT\"; for last; do :; done; if [ \"$n\" -ge 1 ]; then exit 1; fi; printf 'WAVDATA' > \"$last\"",
+    );
+    let count = tmp.path().join("count");
+    let _env = EnvGuard::set("AUDIO_STUB_COUNT", count.to_str().unwrap());
+    let clip = tmp.path().join("clip.wav");
+    std::fs::write(&clip, b"RIFF").unwrap();
+    let cache = tmp.path().join("cache");
+    let err = extract_audio(&clip, 30, &cache, Some(tools.as_path())).unwrap_err();
+    assert!(err.is_file_error());
+    let audio_dir = cache.join("audio");
+    assert_eq!(std::fs::read_dir(&audio_dir).unwrap().count(), 0);
+}

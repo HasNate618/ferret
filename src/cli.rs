@@ -4,11 +4,6 @@
 //! onto an existing file) comes back as `Error::usage`; everything else the
 //! CLI reports as `Error::fatal` (exit 1). `main` prints the `Display` on
 //! stderr and exits with `err.exit_code()`.
-//!
-//! Subcommands whose behavior lands in later tasks are stubs: `index` and
-//! `status` return `Error::fatal("not implemented")` after their usage
-//! validation, and `rm` / `gc` are usage-ok no-ops. `search` runs the
-//! hybrid pipeline (Task 8).
 
 use crate::config::{self, Config, LayerSource, LoadOpts};
 use crate::embedder;

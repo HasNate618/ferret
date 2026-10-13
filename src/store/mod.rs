@@ -631,11 +631,13 @@ fn meta_mismatch(path: &Path, key: &str, found: Option<&str>, expected: &str) ->
 }
 
 /// sqlite-vec reads `FLOAT[d]` blobs as a C `float` array, so the byte order
-/// is the platform's native order.
+/// is the platform's native order. Written explicitly little-endian to
+/// match the query-side `vec_blob` (identical bytes on all v1 targets,
+/// which are all little-endian).
 fn f32_blob(values: &[f32]) -> Vec<u8> {
     let mut bytes = Vec::with_capacity(values.len() * 4);
     for value in values {
-        bytes.extend_from_slice(&value.to_ne_bytes());
+        bytes.extend_from_slice(&value.to_le_bytes());
     }
     bytes
 }

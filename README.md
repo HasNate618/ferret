@@ -139,7 +139,8 @@ Field notes for client authors:
   very selective filters the semantic arm can starve (zero vector
   candidates): widen the filter or raise `search.candidates`.
 - `page` is 1-based for PDF hits, null otherwise. `chunk_kind` is
-  `text` | `image` | `pdf_page`.
+  `text` | `image` | `pdf_page`. The `after` / `before` filters render
+  as unix timestamps (`i64`).
 - No `QUERY` + piped stdin reads one line (never prompts). A bare
   filter with no query text lists matching files (`hybrid` skips the
   vector arm; `mode=semantic` with no text is a usage error).

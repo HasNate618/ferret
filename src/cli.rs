@@ -381,6 +381,23 @@ struct SearchArgs {
 /// `ferret search`: parse the query, run the hybrid pipeline, render.
 /// Fatal errors (config, DB, embedder) propagate as exit 1 with empty
 /// stdout; zero hits is exit 0 with an empty hit list (spec §6.5).
+/// Stand-in embedder for searches that never embed (keyword mode,
+/// filter-only browse): `embed()` is a loud fatal if a code path ever
+/// calls it, so offline operation can never silently return zeros.
+struct NoEmbedder;
+
+impl embedder::Embedder for NoEmbedder {
+    fn embed(&self, _input: embedder::EmbedInput) -> crate::error::Result<Vec<f32>> {
+        Err(Error::fatal(
+            "internal error: NoEmbedder.embed called on a vec-less search",
+        ))
+    }
+
+    fn images_supported(&self) -> bool {
+        false
+    }
+}
+
 fn run_search_cli(
     opts: &LoadOpts,
     query: Option<&str>,
@@ -402,11 +419,26 @@ fn run_search_cli(
         code: args.code,
     };
     let parsed = search::parse_query(query.unwrap_or(""), &flags)?;
-    let embedder = embedder::build_embedder(&cfg, &|k| std::env::var(k).ok())?;
+    // Offline-keyword guarantee (spec §6.1): when the vec arm cannot run,
+    // skip the embedder build (and its health-check dial) entirely. The
+    // rule mirrors `run_search`'s `want_vec` so the two can never disagree:
+    // `semantic` with empty text still builds (run_search usage-errors
+    // after, exactly as before).
+    let mode = args.mode.unwrap_or(cfg.search.mode);
+    let want_vec = match mode {
+        SearchMode::Semantic => true,
+        SearchMode::Hybrid => !parsed.semantic_query.trim().is_empty(),
+        SearchMode::Keyword => false,
+    };
+    let embedder: Box<dyn embedder::Embedder> = if want_vec {
+        embedder::build_embedder(&cfg, &|k| std::env::var(k).ok())?
+    } else {
+        Box::new(NoEmbedder)
+    };
     let store = store::open_existing(&cfg.index.path, &cfg, embedder.images_supported())?;
     let req = SearchRequest {
         parsed,
-        mode: args.mode.unwrap_or(cfg.search.mode),
+        mode,
         limit: args.limit.unwrap_or(cfg.search.default_limit),
         min_score: args.min_score.unwrap_or(cfg.search.min_score),
         json: args.json,

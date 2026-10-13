@@ -246,3 +246,30 @@ fn image_file_without_image_backend_is_skip_not_error() {
     assert_eq!(complete, 1);
     assert_eq!(reason.as_deref(), Some("no_image_backend"));
 }
+
+#[test]
+#[serial]
+fn keyword_search_works_with_dead_endpoint() {
+    let _env = common::test_env();
+    ferret::cli::try_run(&["ferret", "index"]).unwrap();
+    // Defeat the fake hook and point the HTTP backend at a closed port:
+    // keyword mode must never dial it.
+    let _not_fake = EnvGuard::set("FERRET_EMBEDDER", "http");
+    let _dead = EnvGuard::set("FERRET__EMBEDDER__ENDPOINT", "http://127.0.0.1:9");
+    let out =
+        ferret::cli::try_run(&["ferret", "search", "--json", "--mode", "keyword", "pets"])
+            .unwrap();
+    let v: serde_json::Value = serde_json::from_str(&out.stdout).unwrap();
+    assert!(!v["hits"].as_array().unwrap().is_empty());
+}
+
+#[test]
+#[serial]
+fn hybrid_search_fails_with_dead_endpoint() {
+    let _env = common::test_env();
+    ferret::cli::try_run(&["ferret", "index"]).unwrap();
+    let _not_fake = EnvGuard::set("FERRET_EMBEDDER", "http");
+    let _dead = EnvGuard::set("FERRET__EMBEDDER__ENDPOINT", "http://127.0.0.1:9");
+    let err = ferret::cli::try_run(&["ferret", "search", "--json", "pets"]).unwrap_err();
+    assert_eq!(err.exit_code(), 1);
+}

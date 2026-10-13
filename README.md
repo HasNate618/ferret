@@ -231,6 +231,19 @@ PDF pages; `images_supported` flips re-embed affected files.
 (any backend): `FERRET_EMBEDDER=fake ferret index`. The test suite
 (`cargo test`) uses it plus `httpmock` servers — no network, no GPU.
 
+## Offline & cancellation
+
+- `--mode keyword` (and filter-only browse) needs no embedder: it never
+dials the endpoint, so it works offline and against a dead server.
+`hybrid`/`semantic` with query text need the embedder (exit 1 when down).
+- Killing `ferret search` is always safe (read-only clients: no data
+writes, only WAL/trigger setup).
+- Killing `ferret index` then rerunning resumes: finished files keep
+their `complete` rows and are skipped, partial files re-embed, and
+committed PDF pages stay via `next_page` cursors (only uncommitted
+pages redo).
+- Never run two `ferret index` concurrently on the same index.
+
 ## NixOS module
 
 ```nix

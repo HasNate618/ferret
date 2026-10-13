@@ -371,6 +371,8 @@ Per-file extract-errors set `files.error`, leave `complete = 0`, and do not abor
 
 `hybrid` (default) | `semantic` | `keyword`
 
+`keyword` (and filter-only browse) never touches the embedder: no health check, no embedding call, fully offline against an existing index. `hybrid` with no query text also skips the vec arm (browse mode) and is equally offline. `semantic` with no query text is a usage error (exit 2).
+
 RRF:
 
 ```text

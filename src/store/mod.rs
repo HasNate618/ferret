@@ -83,6 +83,9 @@ pub struct NewChunk {
     pub text: Option<String>,
     pub start_byte: Option<i64>,
     pub end_byte: Option<i64>,
+    /// Audio segment timestamps in milliseconds (`None` otherwise).
+    pub t_start_ms: Option<i64>,
+    pub t_end_ms: Option<i64>,
 }
 
 /// Counts for `ferret status`.
@@ -161,6 +164,9 @@ pub fn open(path: &Path, cfg: &Config, images_supported: bool) -> Result<Store> 
         // reaches here, so `chunks` exists for the trigger bodies.
         // Fresh databases already got them from ddl().
         store.conn.execute_batch(schema::triggers())?;
+        // Audio-milestone backfill: pre-audio indexes lack the segment
+        // timestamp columns; ADD COLUMN only when PRAGMA says missing.
+        store.backfill_audio_columns()?;
     }
     Ok(store)
 }
@@ -234,7 +240,7 @@ impl Store {
     }
 
     fn write_initial_meta(&self, cfg: &Config, images_supported: bool) -> Result<()> {
-        let entries: [(&str, String); 9] = [
+        let entries: [(&str, String); 10] = [
             ("schema_version", "1".to_string()),
             ("model_id", cfg.embedder.model.clone()),
             ("dimensions", cfg.embedder.dimensions.to_string()),
@@ -253,6 +259,9 @@ impl Store {
                 "image_pipeline",
                 fingerprint::image_pipeline_json(cfg, images_supported),
             ),
+            // No probe at open (that would dial on every search): Task 6's
+            // index run records the probed value.
+            ("audio_supported", "false".to_string()),
         ];
         for (key, value) in entries {
             self.conn.execute(
@@ -503,12 +512,32 @@ impl Store {
         Ok(())
     }
 
+    /// ADD COLUMN backfill for pre-audio indexes (mirrors the trigger
+    /// backfill above): only adds a column PRAGMA reports missing, so
+    /// fresh and already-migrated opens are no-ops.
+    fn backfill_audio_columns(&self) -> Result<()> {
+        for col in ["t_start_ms", "t_end_ms"] {
+            let missing: i64 = self.conn.query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('chunks') WHERE name = ?1",
+                [col],
+                |r| r.get(0),
+            )?;
+            if missing == 0 {
+                self.conn.execute_batch(&format!(
+                    "ALTER TABLE chunks ADD COLUMN {col} INTEGER"
+                ))?;
+            }
+        }
+        Ok(())
+    }
+
     pub fn insert_chunk(&self, tx: &Transaction<'_>, chunk: NewChunk) -> Result<i64> {
         // Empty text is stored as SQL NULL.
         let text = chunk.text.as_deref().filter(|t| !t.is_empty());
         tx.execute(
-            "INSERT INTO chunks (file_id, ordinal, page, kind, text, start_byte, end_byte)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            "INSERT INTO chunks (file_id, ordinal, page, kind, text, start_byte, end_byte,
+             t_start_ms, t_end_ms)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             params![
                 chunk.file_id,
                 chunk.ordinal,
@@ -517,6 +546,8 @@ impl Store {
                 text,
                 chunk.start_byte,
                 chunk.end_byte,
+                chunk.t_start_ms,
+                chunk.t_end_ms,
             ],
         )?;
         Ok(tx.last_insert_rowid())

@@ -81,6 +81,65 @@ pub fn probe_images(client: &Client, cfg: &Config) -> bool {
     }
 }
 
+/// Deterministic 1s 440Hz sine, 16kHz mono 16-bit PCM with a 44-byte WAV
+/// header (32044 bytes total), synthesized in code — no fixture. Shared
+/// with tests so the probe-body mock can assert the exact base64.
+pub fn probe_wav() -> Vec<u8> {
+    let samples: Vec<i16> = (0..16000)
+        .map(|i| {
+            (i as f32 * 440.0 * std::f32::consts::TAU / 16000.0).sin() * (i16::MAX as f32)
+        })
+        .map(|s| s as i16)
+        .collect();
+    let data_len = (samples.len() * 2) as u32;
+    let mut wav = Vec::with_capacity(44 + samples.len() * 2);
+    wav.extend_from_slice(b"RIFF");
+    wav.extend_from_slice(&(36 + data_len).to_le_bytes());
+    wav.extend_from_slice(b"WAVEfmt ");
+    wav.extend_from_slice(&16u32.to_le_bytes());
+    wav.extend_from_slice(&1u16.to_le_bytes());
+    wav.extend_from_slice(&1u16.to_le_bytes());
+    wav.extend_from_slice(&16000u32.to_le_bytes());
+    wav.extend_from_slice(&32000u32.to_le_bytes());
+    wav.extend_from_slice(&2u16.to_le_bytes());
+    wav.extend_from_slice(&16u16.to_le_bytes());
+    wav.extend_from_slice(b"data");
+    wav.extend_from_slice(&data_len.to_le_bytes());
+    for s in samples {
+        wav.extend_from_slice(&s.to_le_bytes());
+    }
+    wav
+}
+
+/// Audio capability probe: POSTs the 1s sine as a llama `input_audio`
+/// part (Appendix B.6 shape; Task 5 unifies this body with `audio_body`).
+/// True only on 200 + a 768-d embedding. Non-llama backends refuse audio
+/// (Task 5) and return false without dialing.
+pub fn probe_audio(client: &Client, cfg: &Config) -> bool {
+    use base64::Engine as _;
+    if cfg.embedder.backend != crate::types::Backend::LlamaServer {
+        return false;
+    }
+    let data = base64::engine::general_purpose::STANDARD.encode(probe_wav());
+    let body = json!({
+        "model": cfg.embedder.model,
+        "encoding_format": "float",
+        "input": [{ "content": [{ "type": "input_audio",
+            "input_audio": { "data": data } }] }],
+    });
+    let resp = authed(client.post(embeddings_url(cfg)), cfg)
+        .json(&body)
+        .send();
+    match resp {
+        Ok(r) if r.status().is_success() => r.json::<serde_json::Value>().is_ok_and(|v| {
+            v.pointer("/data/0/embedding")
+                .and_then(|e| e.as_array())
+                .is_some_and(|a| a.len() == 768)
+        }),
+        _ => false,
+    }
+}
+
 /// POST URL for `cfg`, tolerating a trailing slash on the endpoint.
 pub fn embeddings_url(cfg: &Config) -> String {
     format!("{}/v1/embeddings", base_url(cfg))

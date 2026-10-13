@@ -663,3 +663,59 @@ fn openai_textless_pdf_posts_empty_string() {
         .unwrap();
     mock.assert();
 }
+
+#[test]
+fn probe_audio_true_on_768d_response() {
+    use base64::Engine as _;
+    use ferret::embedder::probe::{probe_audio, probe_wav};
+    let server = httpmock::MockServer::start();
+    let data = base64::engine::general_purpose::STANDARD.encode(probe_wav());
+    let mock = server.mock(|when, then| {
+        when.method("POST")
+            .path("/v1/embeddings")
+            .json_body(serde_json::json!({
+                "model": "embeddinggemma-2",
+                "encoding_format": "float",
+                "input": [{ "content": [{ "type": "input_audio",
+                    "input_audio": { "data": data } }] }]
+            }));
+        then.status(200).json_body(serde_json::json!({
+            "data": [{ "embedding": vec![0.1; 768] }]
+        }));
+    });
+    let cfg = test_cfg(&server.base_url());
+    let client = reqwest::blocking::Client::new();
+    assert!(probe_audio(&client, &cfg));
+    mock.assert();
+}
+
+#[test]
+fn probe_audio_false_on_400() {
+    use ferret::embedder::probe::probe_audio;
+    let server = httpmock::MockServer::start();
+    let mock = server.mock(|when, then| {
+        when.method("POST").path("/v1/embeddings");
+        then.status(400).body("no audio here");
+    });
+    let cfg = test_cfg(&server.base_url());
+    let client = reqwest::blocking::Client::new();
+    assert!(!probe_audio(&client, &cfg));
+    mock.assert();
+}
+
+#[test]
+fn probe_audio_false_without_posting_for_openai() {
+    use ferret::embedder::probe::probe_audio;
+    let server = httpmock::MockServer::start();
+    let mock = server.mock(|when, then| {
+        when.method("POST").path("/v1/embeddings");
+        then.status(200).json_body(serde_json::json!({
+            "data": [{ "embedding": vec![0.1; 768] }]
+        }));
+    });
+    let mut cfg = test_cfg(&server.base_url());
+    cfg.embedder.backend = Backend::Openai;
+    let client = reqwest::blocking::Client::new();
+    assert!(!probe_audio(&client, &cfg));
+    mock.assert_hits(0);
+}

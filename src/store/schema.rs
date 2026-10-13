@@ -38,7 +38,9 @@ CREATE TABLE chunks (
   kind TEXT NOT NULL,
   text TEXT,
   start_byte INTEGER,
-  end_byte INTEGER
+  end_byte INTEGER,
+  t_start_ms INTEGER,
+  t_end_ms INTEGER
 );
 CREATE VIRTUAL TABLE chunks_fts USING fts5(
   text, filename, path, tokenize='unicode61'

@@ -328,3 +328,17 @@ fn index_only_cli_indexes_given_path() {
     let hits = try_run(&["ferret", "search", "--json", "solo"]).unwrap();
     assert!(hits.stdout.contains("solo.txt"));
 }
+
+#[test]
+#[serial_test::serial]
+fn audio_supported_meta_defaults_false() {
+    let env = common::test_env();
+    try_run(&["ferret", "index"]).unwrap();
+    let conn = rusqlite::Connection::open(&env.index).unwrap();
+    let v: String = conn
+        .query_row("SELECT value FROM meta WHERE key = 'audio_supported'", [], |r| {
+            r.get(0)
+        })
+        .unwrap();
+    assert_eq!(v, "false");
+}

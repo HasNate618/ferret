@@ -72,6 +72,8 @@ fn add_file(
                 text: text.map(str::to_string),
                 start_byte: None,
                 end_byte: None,
+                t_start_ms: None,
+                t_end_ms: None,
             },
         )
         .unwrap();

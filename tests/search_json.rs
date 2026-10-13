@@ -63,6 +63,8 @@ fn fixture() -> (Store, Config, FakeEmbedder) {
                 text: Some(DOC_TEXT.into()),
                 start_byte: None,
                 end_byte: None,
+                t_start_ms: None,
+                t_end_ms: None,
             },
         )
         .unwrap();

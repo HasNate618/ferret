@@ -702,6 +702,8 @@ fn process_pdf_page(
                 text: stored_text,
                 start_byte: None,
                 end_byte: None,
+                t_start_ms: None,
+                t_end_ms: None,
             },
         )?;
         store.insert_vec(
@@ -1269,6 +1271,8 @@ fn index_file(
                 text: c.text.clone(),
                 start_byte: c.start_byte,
                 end_byte: c.end_byte,
+                t_start_ms: c.t_start_ms,
+                t_end_ms: c.t_end_ms,
             },
         )?;
         if matches!(c.embed, EmbedDecision::Vec) {

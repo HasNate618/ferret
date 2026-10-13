@@ -4,6 +4,7 @@ mod common;
 
 use ferret::config::{Config, compiled_defaults};
 use ferret::store::{self, NewChunk, NewFile, Store};
+use rusqlite;
 use ferret::types::{Backend, ChunkKind, FileKind, PrefixProfile};
 use std::cell::RefCell;
 use std::path::PathBuf;
@@ -65,6 +66,8 @@ fn chunk(file_id: i64, ordinal: i64, kind: ChunkKind, text: Option<&str>) -> New
         text: text.map(String::from),
         start_byte: None,
         end_byte: None,
+        t_start_ms: None,
+        t_end_ms: None,
     }
 }
 
@@ -210,6 +213,8 @@ fn file_kind_metadata_is_files_kind_not_chunk_kind() {
                 text: Some("pets".into()),
                 start_byte: None,
                 end_byte: None,
+                t_start_ms: None,
+                t_end_ms: None,
             },
         )
         .unwrap();
@@ -338,6 +343,8 @@ fn delete_chunk_kind_sides_keep_the_other_side() {
                 text: Some("page".into()),
                 start_byte: None,
                 end_byte: None,
+                t_start_ms: None,
+                t_end_ms: None,
             },
         )
         .unwrap();
@@ -456,4 +463,33 @@ fn non_ferret_sqlite_file_is_fatal() {
     let err = store::open(&path, &cfg_with_dims(768), true).unwrap_err();
     assert_eq!(err.exit_code(), 1);
     assert!(err.to_string().contains("meta"), "{}", err);
+}
+
+#[test]
+fn old_db_gains_timestamp_columns_on_open() {
+    // Simulate a pre-audio index: full schema minus the new columns.
+    let path = tmp_index();
+    let cfg = cfg_with_dims(768);
+    {
+        let _store = store::open(&path, &cfg, true).unwrap();
+    }
+    {
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        conn.execute_batch(
+            "ALTER TABLE chunks DROP COLUMN t_start_ms; \
+             ALTER TABLE chunks DROP COLUMN t_end_ms;",
+        )
+        .unwrap();
+    }
+    let _store = store::open(&path, &cfg, true).unwrap();
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    let cols: Vec<String> = conn
+        .prepare("PRAGMA table_info(chunks)")
+        .unwrap()
+        .query_map([], |r| r.get(1))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert!(cols.contains(&"t_start_ms".to_string()));
+    assert!(cols.contains(&"t_end_ms".to_string()));
 }

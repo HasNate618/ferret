@@ -228,23 +228,15 @@ impl Walker<'_> {
     /// include_globs, and gitignore, in the spec's order.
     fn emit_file(&mut self, path: &Path, root: &Path, collection: &str) -> Result<()> {
         // 0. HEIC/HEIF gate first (spec §4.3): `skip` (default) is a
-        // HeicSkip; `magick` with no converter on PATH is a `no_magick`
-        // walk-skip (spec §4.5: walk-skips leave no row). `magick` with a
-        // converter types them as images below even though the default
-        // extension map omits heic/heif — otherwise the kind lookup would
-        // report unsupported_ext and the magick path would be
-        // unreachable. An explicit user mapping still wins.
-        if matches!(ext_of(path).as_str(), "heic" | "heif") {
-            if matches!(self.files_cfg.heic, crate::types::HeicMode::Skip) {
-                self.skip(path, SkipReason::HeicSkip);
-                return Ok(());
-            }
-            if matches!(self.files_cfg.heic, crate::types::HeicMode::Magick)
-                && crate::extract::image::find_magick().is_none()
-            {
-                self.skip(path, SkipReason::NoMagick);
-                return Ok(());
-            }
+        // HeicSkip. `magick` types unmapped files as images below even
+        // though the default extension map omits heic/heif — otherwise
+        // the kind lookup would report unsupported_ext and the magick
+        // path would be unreachable. An explicit user mapping still wins.
+        if matches!(ext_of(path).as_str(), "heic" | "heif")
+            && matches!(self.files_cfg.heic, crate::types::HeicMode::Skip)
+        {
+            self.skip(path, SkipReason::HeicSkip);
+            return Ok(());
         }
         // 1. Extension typing (unknown extensions are walk-skips).
         let ext = ext_of(path);
@@ -256,6 +248,17 @@ impl Walker<'_> {
                 return Ok(());
             }
         };
+        // NoMagick gate (spec §4.3): heic/heif that would need conversion
+        // with no converter on PATH. An explicit non-image mapping
+        // bypasses it — the file is read as that kind, never converted.
+        if matches!(ext.as_str(), "heic" | "heif")
+            && matches!(self.files_cfg.heic, crate::types::HeicMode::Magick)
+            && kind == FileKind::Image
+            && crate::extract::image::find_magick().is_none()
+        {
+            self.skip(path, SkipReason::NoMagick);
+            return Ok(());
+        }
 
         let rel = path.strip_prefix(root).unwrap_or(path);
 

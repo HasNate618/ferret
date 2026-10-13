@@ -177,7 +177,13 @@ fn config_path_lists_user_file_then_layers() {
 #[serial]
 fn rm_and_gc_stubs_exit_zero() {
     let tmp = tempfile::tempdir().unwrap();
-    unsafe { std::env::set_var("XDG_CONFIG_HOME", tmp.path()) };
+    // Isolate every XDG dir: under sandboxes (e.g. `nix build`) HOME is
+    // not writable, so the default data dir must not be resolved there.
+    unsafe {
+        std::env::set_var("XDG_CONFIG_HOME", tmp.path().join("cfg"));
+        std::env::set_var("XDG_DATA_HOME", tmp.path().join("data"));
+        std::env::set_var("XDG_CACHE_HOME", tmp.path().join("cache"));
+    }
     try_run(&["ferret", "rm", "/nonexistent/path"]).unwrap();
     try_run(&["ferret", "gc"]).unwrap();
 }

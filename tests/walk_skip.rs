@@ -240,6 +240,11 @@ fn explicit_heic_mapping_wins_over_magick_default() {
 fn heic_magick_mode_types_unmapped_heic_as_image() {
     // No user mapping + magick mode: the heic gate must not report
     // unsupported_ext (the magick path would otherwise be unreachable).
+    // Needs host magick: without a converter this is a no_magick skip.
+    if !host_has_magick() {
+        eprintln!("skip: no magick or convert on PATH");
+        return;
+    }
     use ferret::types::HeicMode;
     let (_tmp, root) = fixture_tree();
     std::fs::write(root.join("pic.heic"), "x").unwrap();
@@ -254,4 +259,13 @@ fn heic_magick_mode_types_unmapped_heic_as_image() {
         e,
         WalkEvent::Skip { reason: SkipReason::UnsupportedExt, path } if path.ends_with("pic.heic")
     )));
+}
+
+/// Host capability gate (`find_magick` is `pub(crate)`).
+fn host_has_magick() -> bool {
+    std::env::var_os("PATH").is_some_and(|paths| {
+        std::env::split_paths(&paths).any(|dir| {
+            ["magick", "convert"].iter().any(|bin| dir.join(bin).is_file())
+        })
+    })
 }

@@ -96,6 +96,10 @@ enum Command {
         /// Extra paths in addition to configured roots.
         #[arg(value_name = "PATH")]
         paths: Vec<PathBuf>,
+        /// Only index the given PATHs; never walk configured roots.
+        /// Requires at least one PATH (watcher recipe).
+        #[arg(long)]
+        only: bool,
         /// Emit NDJSON events to stdout instead of the summary.
         #[arg(long)]
         json: bool,
@@ -215,11 +219,16 @@ fn execute(
             paths,
             json,
             strict,
+            only,
         } => {
+            if only && paths.is_empty() {
+                return Err(Error::usage("--only requires at least one PATH"));
+            }
             let cfg = config::load(&opts)?;
             upload_warning(&cfg, stderr);
             let embedder = embedder::build_embedder(&cfg, &|k| std::env::var(k).ok())?;
-            let summary = index::run(&cfg, embedder.as_ref(), paths, json, strict, stdout, stderr)?;
+            let summary =
+                index::run(&cfg, embedder.as_ref(), paths, json, strict, only, stdout, stderr)?;
             if !json {
                 writeln!(
                     stderr,

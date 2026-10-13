@@ -90,12 +90,14 @@ pub fn kind_for_ext(
 }
 
 /// Walk every configured root plus the extra paths, returning events in a
-/// deterministic (name-sorted) order.
+/// deterministic (name-sorted) order. With `only`, the roots loop is
+/// skipped but `roots` still drives extra-path collection inheritance.
 pub fn walk(
     roots: &[RootEntry],
     extra: &[PathBuf],
     files_cfg: &FilesConfig,
     follow_symlinks: bool,
+    only: bool,
 ) -> Result<Vec<WalkEvent>> {
     let exclude = build_globset(&files_cfg.exclude_globs)?;
     let include = if files_cfg.include_globs.is_empty() {
@@ -114,7 +116,7 @@ pub fn walk(
         events: Vec::new(),
     };
 
-    for root in roots {
+    for root in roots.iter().filter(|_| !only) {
         w.walk_dir(
             &root.path,
             &root.path,

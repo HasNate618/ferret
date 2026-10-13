@@ -36,6 +36,7 @@ fn run_json(cfg: &ferret::config::Config) -> (ferret::index::IndexSummary, Strin
         vec![],
         true,
         false,
+        false,
         &mut stdout,
         &mut stderr,
     )
@@ -359,7 +360,7 @@ fn failed_page_two_keeps_committed_page_one() {
     let mut stdout: Vec<u8> = Vec::new();
     let mut stderr: Vec<u8> = Vec::new();
     let summary =
-        ferret::index::run(&cfg, &failer, vec![], true, false, &mut stdout, &mut stderr).unwrap();
+        ferret::index::run(&cfg, &failer, vec![], true, false, false, &mut stdout, &mut stderr).unwrap();
     assert_eq!(summary.errors, 1);
     // Page 1's chunk survives the page-2 failure (spec §9 partial file).
     assert_eq!(chunk_pages(&env.index, "doc.pdf"), vec![1]);
@@ -401,6 +402,7 @@ fn embed_text_false_embeds_pages_as_bare_images() {
         &recorder,
         vec![],
         true,
+        false,
         false,
         &mut stdout,
         &mut stderr,

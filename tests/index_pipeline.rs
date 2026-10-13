@@ -199,7 +199,7 @@ fn index_json_emits_plan_event_first() {
     );
     let mut out = Vec::new();
     let mut err = Vec::new();
-    ferret::index::run(&cfg, &embedder, vec![], true, false, &mut out, &mut err).unwrap();
+    ferret::index::run(&cfg, &embedder, vec![], true, false, false, &mut out, &mut err).unwrap();
     let stdout = String::from_utf8(out).unwrap();
     let first: serde_json::Value =
         serde_json::from_str(stdout.lines().next().unwrap()).unwrap();
@@ -224,7 +224,7 @@ fn index_json_emits_summary_event_last() {
     );
     let mut out = Vec::new();
     let mut err = Vec::new();
-    ferret::index::run(&cfg, &embedder, vec![], true, false, &mut out, &mut err).unwrap();
+    ferret::index::run(&cfg, &embedder, vec![], true, false, false, &mut out, &mut err).unwrap();
     let stdout = String::from_utf8(out).unwrap();
     let last: serde_json::Value =
         serde_json::from_str(stdout.lines().last().unwrap()).unwrap();
@@ -239,4 +239,78 @@ fn index_json_emits_summary_event_last() {
             .filter(|l| l.contains("\"status\":\"skip\""))
             .count() as u64
     );
+}
+
+#[test]
+#[serial_test::serial]
+fn index_only_skips_roots_walk() {
+    let env = common::test_env();
+    let root_a = env.root.join("a");
+    let root_b = env.root.join("b");
+    std::fs::create_dir_all(&root_a).unwrap();
+    std::fs::create_dir_all(&root_b).unwrap();
+    std::fs::write(root_a.join("in_a.txt"), "alpha alpha alpha").unwrap();
+    std::fs::write(root_b.join("in_b.txt"), "beta beta beta").unwrap();
+    std::fs::write(
+        &env.cfg,
+        format!(
+            "index.roots = [\"{}\", \"{}\"]\n",
+            root_a.display(),
+            root_b.display()
+        ),
+    )
+    .unwrap();
+    let cfg = ferret::config::load(&ferret::config::LoadOpts::default()).unwrap();
+    let embedder = FakeEmbedder::new_with_profile(
+        cfg.embedder.prefix_profile,
+        cfg.embedder.dimensions,
+    );
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+    // --only path in B: A must never appear in NDJSON.
+    ferret::index::run(
+        &cfg,
+        &embedder,
+        vec![root_b.join("in_b.txt")],
+        true,
+        false,
+        true,
+        &mut out,
+        &mut err,
+    )
+    .unwrap();
+    let stdout = String::from_utf8(out).unwrap();
+    assert!(stdout.contains("in_b.txt"));
+    assert!(!stdout.contains("in_a.txt"));
+    // The --only path sits under configured root B: it inherits collection
+    // "b", not its own basename (P1 fix — empty-roots slicing lost this).
+    let conn = rusqlite::Connection::open(&env.index).unwrap();
+    let collection: String = conn
+        .query_row(
+            "SELECT collection FROM files WHERE path LIKE '%in_b.txt'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(collection, "b");
+}
+
+#[test]
+#[serial_test::serial]
+fn index_only_cli_indexes_given_path() {
+    let env = common::test_env();
+    std::fs::remove_file(env.root.join("pets.md")).unwrap();
+    let target = env.root.join("solo.txt");
+    std::fs::write(&target, "solo content here").unwrap();
+    let out = try_run(&[
+        "ferret",
+        "index",
+        "--only",
+        "--json",
+        target.to_str().unwrap(),
+    ])
+    .unwrap();
+    assert!(out.stdout.contains("solo.txt"));
+    let hits = try_run(&["ferret", "search", "--json", "solo"]).unwrap();
+    assert!(hits.stdout.contains("solo.txt"));
 }

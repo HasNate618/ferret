@@ -87,7 +87,7 @@ override the image probe.
 ferret [--config FILE] [--index PATH] <command>
 
 init [--root DIR]... [--force]   write starter config.toml (no network)
-index [PATH]... [--json] [--strict]
+index [PATH]... [--json] [--strict] [--only]
 search [QUERY] [filters] [--json] [--mode semantic|keyword|hybrid] [--code]
 rm PATH...                       delete rows (missing paths warn, exit 0)
 gc                               drop rows whose files are gone
@@ -112,6 +112,8 @@ the event replaces that stderr line, which is suppressed). Statuses: `ok`, `skip
 `skip_rule`, `no_image_backend`, `heic_skip`, `no_magick`,
 `gitignore`, `include_globs`), `error` (with message; the DB row is
 `complete=0`, walk continues).
+
+`ferret index --only PATH…` indexes exactly those paths and never walks configured roots (`--only` with no PATHs is exit 2). Watcher recipe: batch inotify-changed paths into one `--only` run; chunk ~500 paths per argv client-side.
 
 ## Search JSON contract (frozen)
 

@@ -81,6 +81,7 @@ fn multimodal_false_records_skip_row_not_error() {
         vec![],
         true,
         false,
+        false,
         &mut stdout,
         &mut Vec::new(),
     )
@@ -116,6 +117,7 @@ fn flip_to_supported_reembeds_skipped_image() {
         vec![],
         true,
         false,
+        false,
         &mut stdout,
         &mut Vec::new(),
     )
@@ -132,6 +134,7 @@ fn flip_to_supported_reembeds_skipped_image() {
         &fake,
         vec![],
         true,
+        false,
         false,
         &mut stdout,
         &mut Vec::new(),
@@ -158,6 +161,7 @@ fn text_pipeline_bump_reproduces_image_vecs() {
         vec![],
         false,
         false,
+        false,
         &mut stdout,
         &mut Vec::new(),
     )
@@ -178,6 +182,7 @@ fn text_pipeline_bump_reproduces_image_vecs() {
         &cfg,
         &fake_for(&cfg),
         vec![],
+        false,
         false,
         false,
         &mut stdout,
@@ -219,6 +224,7 @@ fn heic_magick_without_binary_is_walk_skip() {
         &fake_for(&cfg),
         vec![],
         true,
+        false,
         false,
         &mut stdout,
         &mut Vec::new(),

@@ -587,6 +587,9 @@ Tilde expansion uses the process home. `max_size` accepts integer bytes or `KiB`
 ```text
 ferret init [--root DIR]... [--force]
 ferret index [PATH]...          # extra paths in addition to configured roots
+ferret index --only PATH...     # index exactly these paths, skip the roots walk
+                                # (--only with no PATHs: exit 2; watcher recipe:
+                                # batch changed paths per run, chunk ~500 client-side)
 ferret search [QUERY] [--json] [filters...]
 ferret rm PATH...               # delete those paths from the index
 ferret gc                       # delete DB rows whose files are gone

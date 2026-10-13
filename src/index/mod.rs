@@ -45,6 +45,7 @@ pub fn run(
     extra_paths: Vec<PathBuf>,
     json_ndjson: bool,
     strict: bool,
+    only: bool,
     out: &mut dyn std::io::Write,
     err: &mut dyn std::io::Write,
 ) -> Result<IndexSummary> {
@@ -64,11 +65,14 @@ pub fn run(
     let dirs = ferret_dirs(&|k| std::env::var(k).ok());
     let mut summary = IndexSummary::default();
 
+    // `--only`: skip the roots walk entirely. `roots` are still passed to
+    // `walk` so extra paths under a configured root inherit its collection.
     let events = walk::walk(
         &cfg.index.roots,
         &extra_paths,
         &cfg.files,
         cfg.files.follow_symlinks,
+        only,
     )?;
     summary.seen = events.len() as u64;
 

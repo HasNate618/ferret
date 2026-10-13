@@ -223,6 +223,7 @@ fn image_file_without_image_backend_is_skip_not_error() {
         vec![],
         true,
         false,
+        false,
         &mut stdout,
         &mut Vec::new(),
     )

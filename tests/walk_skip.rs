@@ -30,7 +30,7 @@ fn root_entry(root: &Path) -> ferret::config::RootEntry {
 }
 
 fn walk_one(root: &Path) -> Vec<WalkEvent> {
-    walk(&[root_entry(root)], &[], &files_cfg(), false).unwrap()
+    walk(&[root_entry(root)], &[], &files_cfg(), false, false).unwrap()
 }
 
 fn fixture_tree() -> (tempfile::TempDir, PathBuf) {
@@ -73,7 +73,7 @@ fn hidden_skipped_unless_include_hidden() {
     // With include_hidden the hidden file is walked instead.
     let mut cfg = files_cfg();
     cfg.include_hidden = true;
-    let ev = walk(&[root_entry(&root)], &[], &cfg, false).unwrap();
+    let ev = walk(&[root_entry(&root)], &[], &cfg, false, false).unwrap();
     assert!(
         ev.iter()
             .any(|e| matches!(e, WalkEvent::File { path, .. } if path.ends_with("a.txt")))
@@ -85,7 +85,7 @@ fn include_globs_skips_non_matching() {
     let (_tmp, root) = fixture_tree();
     let mut cfg = files_cfg();
     cfg.include_globs = vec!["*.md".into()];
-    let ev = walk(&[root_entry(&root)], &[], &cfg, false).unwrap();
+    let ev = walk(&[root_entry(&root)], &[], &cfg, false, false).unwrap();
     assert!(ev.iter().any(|e| matches!(
         e,
         WalkEvent::Skip {
@@ -107,7 +107,7 @@ fn gitignore_skip() {
     std::fs::write(root.join(".gitignore"), "skipme.txt\n").unwrap();
     std::fs::write(root.join("skipme.txt"), "x").unwrap();
     std::fs::write(root.join("keep.md"), "y").unwrap();
-    let ev = walk(&[root_entry(&root)], &[], &files_cfg(), false).unwrap();
+    let ev = walk(&[root_entry(&root)], &[], &files_cfg(), false, false).unwrap();
     assert!(ev.iter().any(|e| matches!(
         e,
         WalkEvent::Skip {
@@ -128,6 +128,7 @@ fn extra_path_under_root_inherits_collection() {
         &[root_entry(&root)],
         &[root.join("ok.md")],
         &files_cfg(),
+        false,
         false,
     )
     .unwrap();
@@ -205,7 +206,7 @@ fn gitignored_directory_pruned() {
     std::fs::write(root.join(".gitignore"), "build/\n").unwrap();
     std::fs::write(root.join("build/out.bin"), "x").unwrap();
     std::fs::write(root.join("keep.md"), "y").unwrap();
-    let ev = walk(&[root_entry(&root)], &[], &files_cfg(), false).unwrap();
+    let ev = walk(&[root_entry(&root)], &[], &files_cfg(), false, false).unwrap();
     // The directory is reported skipped and its contents are not walked.
     assert!(ev.iter().any(|e| matches!(
         e,
@@ -227,7 +228,7 @@ fn exclude_globs_and_max_size_are_skip_rules() {
     let mut cfg = files_cfg();
     cfg.exclude_globs = vec!["*.log".into()];
     cfg.max_size = 5;
-    let ev = walk(&[root_entry(&root)], &[], &cfg, false).unwrap();
+    let ev = walk(&[root_entry(&root)], &[], &cfg, false, false).unwrap();
     assert!(ev.iter().any(|e| matches!(
         e,
         WalkEvent::Skip { path, reason: SkipReason::SkipRule } if path.ends_with("x.log")
@@ -246,7 +247,7 @@ fn no_git_dir_means_no_gitignore_skips() {
     std::fs::create_dir_all(&root).unwrap();
     std::fs::write(root.join(".gitignore"), "keep.md\n").unwrap();
     std::fs::write(root.join("keep.md"), "y").unwrap();
-    let ev = walk(&[root_entry(&root)], &[], &files_cfg(), false).unwrap();
+    let ev = walk(&[root_entry(&root)], &[], &files_cfg(), false, false).unwrap();
     assert!(
         ev.iter()
             .any(|e| matches!(e, WalkEvent::File { path, .. } if path.ends_with("keep.md")))
@@ -271,7 +272,7 @@ fn explicit_heic_mapping_wins_over_magick_default() {
     cfg.heic = HeicMode::Magick;
     cfg.extension_kind
         .insert("heic".to_string(), FileKind::Text);
-    let ev = walk(&[root_entry(&root)], &[], &cfg, false).unwrap();
+    let ev = walk(&[root_entry(&root)], &[], &cfg, false, false).unwrap();
     assert!(ev.iter().any(|e| matches!(
         e,
         WalkEvent::File { kind: FileKind::Text, ext, .. } if ext == "heic"
@@ -292,7 +293,7 @@ fn heic_magick_mode_types_unmapped_heic_as_image() {
     std::fs::write(root.join("pic.heic"), "x").unwrap();
     let mut cfg = files_cfg();
     cfg.heic = HeicMode::Magick;
-    let ev = walk(&[root_entry(&root)], &[], &cfg, false).unwrap();
+    let ev = walk(&[root_entry(&root)], &[], &cfg, false, false).unwrap();
     assert!(ev.iter().any(|e| matches!(
         e,
         WalkEvent::File { kind: FileKind::Image, ext, .. } if ext == "heic"

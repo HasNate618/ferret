@@ -192,3 +192,10 @@ fn rm_and_gc_stubs_exit_zero() {
     try_run(&["ferret", "rm", "/nonexistent/path"]).unwrap();
     try_run(&["ferret", "gc"]).unwrap();
 }
+
+#[test]
+#[serial]
+fn index_only_without_paths_is_usage_error() {
+    let err = try_run(&["ferret", "index", "--only"]).unwrap_err();
+    assert_eq!(err.exit_code(), 2);
+}

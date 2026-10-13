@@ -286,3 +286,76 @@ fn ext_filter_restricts_by_extension() {
     let hits = search(&h, "pets", &flags);
     assert_eq!(hits, vec!["/x/lease.md".to_string()]);
 }
+
+fn add_audio_file(h: &Harness, path: &str, t_start_ms: i64, t_end_ms: i64) {
+    let ext = path.rsplit('.').next().unwrap_or("");
+    let tx = h.store.begin().unwrap();
+    let file_id = h
+        .store
+        .upsert_file(&NewFile {
+            path: path.into(),
+            collection: "c".into(),
+            kind: FileKind::Audio,
+            ext: ext.into(),
+            size: 1,
+            mtime: MTIME,
+            fingerprint: "fp".into(),
+            complete: true,
+            next_page: None,
+            skip_reason: None,
+            indexed_at: 1,
+            error: None,
+        })
+        .unwrap();
+    let chunk_id = h
+        .store
+        .insert_chunk(
+            &tx,
+            NewChunk {
+                file_id,
+                ordinal: 0,
+                page: None,
+                kind: ChunkKind::AudioSegment,
+                text: None,
+                start_byte: None,
+                end_byte: None,
+                t_start_ms: Some(t_start_ms),
+                t_end_ms: Some(t_end_ms),
+            },
+        )
+        .unwrap();
+    let embedding = h
+        .fake
+        .embed(EmbedInput::Audio {
+            wav_bytes: vec![7; 100],
+        })
+        .unwrap();
+    h.store
+        .insert_vec(&tx, chunk_id, &embedding, FileKind::Audio, ext, MTIME, "c")
+        .unwrap();
+    tx.commit().unwrap();
+}
+
+#[test]
+fn kind_audio_returns_only_audio() {
+    let h = harness();
+    add_file(
+        &h,
+        "/x/doc.txt",
+        FileKind::Text,
+        ChunkKind::Text,
+        Some("sine tone text"),
+        None,
+    );
+    add_audio_file(&h, "/x/sweep.wav", 0, 30000);
+    let audio_flags = FilterFlags {
+        kind: vec![FileKind::Audio],
+        ..Default::default()
+    };
+    assert_eq!(search(&h, "sine tone", &audio_flags), vec!["/x/sweep.wav".to_string()]);
+    let text_flags = FilterFlags {
+        kind: vec![FileKind::Text],
+        ..Default::default()
+    };
+    assert_eq!(search(&h, "sine tone", &text_flags), vec!["/x/doc.txt".to_string()]);
+}

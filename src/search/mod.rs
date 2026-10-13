@@ -273,7 +273,8 @@ fn load_hit(
 ) -> Result<Hit> {
     let row = conn
         .query_row(
-            "SELECT f.path, f.kind, c.kind, f.collection, f.ext, f.mtime, c.page, c.ordinal, c.text
+            "SELECT f.path, f.kind, c.kind, f.collection, f.ext, f.mtime, c.page, c.ordinal, c.text,
+             c.t_start_ms, c.t_end_ms
              FROM chunks c JOIN files f ON f.id = c.file_id WHERE c.id = ?",
             [chunk_id],
             |r| {
@@ -287,13 +288,18 @@ fn load_hit(
                     r.get::<_, Option<i64>>(6)?,
                     r.get::<_, i64>(7)?,
                     r.get::<_, Option<String>>(8)?,
+                    r.get::<_, Option<i64>>(9)?,
+                    r.get::<_, Option<i64>>(10)?,
                 ))
             },
         )
         .optional()?
         .ok_or_else(|| Error::fatal(format!("chunk {chunk_id} vanished mid-search")))?;
-    let (path, kind, chunk_kind, collection, ext, mtime, page, ordinal, text) = row;
+    let (path, kind, chunk_kind, collection, ext, mtime, page, ordinal, text, t_start_ms, t_end_ms) =
+        row;
 
+    let chunk_kind_parsed =
+        ChunkKind::from_str(&chunk_kind).map_err(|e| Error::fatal(format!("chunks.kind: {e}")))?;
     let (snippet, snippet_spans) = match text.filter(|t| !t.trim().is_empty()) {
         Some(t) => {
             let (snippet, win_start) = snippet_window(&t, terms);
@@ -303,14 +309,24 @@ fn load_hit(
             };
             (snippet, spans)
         }
+        // Audio segments timestamp the basename (`t_end` missing renders
+        // `?`, never panics); everything else textless is bare basename.
+        None if chunk_kind_parsed == ChunkKind::AudioSegment => (
+            format!(
+                "[{}–{}] {}",
+                t_start_ms.map(fmt_ts).unwrap_or_else(|| "?".into()),
+                t_end_ms.map(fmt_ts).unwrap_or_else(|| "?".into()),
+                basename(&path),
+            ),
+            Vec::new(),
+        ),
         None => (basename(&path), Vec::new()),
     };
 
     Ok(Hit {
         path: path.clone(),
         kind: FileKind::from_str(&kind).map_err(|e| Error::fatal(format!("files.kind: {e}")))?,
-        chunk_kind: ChunkKind::from_str(&chunk_kind)
-            .map_err(|e| Error::fatal(format!("chunks.kind: {e}")))?,
+        chunk_kind: chunk_kind_parsed,
         collection,
         ext,
         page,
@@ -333,6 +349,13 @@ fn basename(path: &str) -> String {
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| path.to_string())
+}
+
+/// Milliseconds as `mm:ss` for audio snippet stamps (hours fold into
+/// minutes; negatives clamp to zero — display only, never panics).
+fn fmt_ts(ms: i64) -> String {
+    let s = ms.max(0) / 1000;
+    format!("{:02}:{:02}", s / 60, s % 60)
 }
 
 /// ≤200 characters from `text` around the first query-term match window;

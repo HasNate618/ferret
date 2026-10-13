@@ -348,3 +348,112 @@ fn search_json_spans_empty_for_image_hits() {
         assert_eq!(h["snippet_spans"], serde_json::json!([]));
     }
 }
+
+/// A temp store holding one audio file with one 30s segment chunk + vec
+/// row (FTS row lands via trigger with NULL text, like images).
+fn audio_fixture() -> (Store, Config, FakeEmbedder) {
+    let dims = 8u32;
+    let mut cfg = compiled_defaults(&common::test_dirs(std::path::Path::new("/ferret-t8-audio")));
+    cfg.embedder.dimensions = dims;
+    let dir = tempfile::tempdir().unwrap();
+    let store = store::open(&dir.path().join("index.sqlite"), &cfg, true).unwrap();
+    let fake = FakeEmbedder::new_with_profile(PrefixProfile::EmbeddingGemma2, dims);
+    let embedding = fake
+        .embed(EmbedInput::Audio {
+            wav_bytes: vec![7; 100],
+        })
+        .unwrap();
+    let tx = store.begin().unwrap();
+    let file_id = store
+        .upsert_file(&NewFile {
+            path: "/home/nate/Music/sweep.wav".into(),
+            collection: "Documents".into(),
+            kind: FileKind::Audio,
+            ext: "wav".into(),
+            size: 100,
+            mtime: MTIME,
+            fingerprint: "fp".into(),
+            complete: true,
+            next_page: None,
+            skip_reason: None,
+            indexed_at: 1,
+            error: None,
+        })
+        .unwrap();
+    let chunk_id = store
+        .insert_chunk(
+            &tx,
+            NewChunk {
+                file_id,
+                ordinal: 0,
+                page: None,
+                kind: ChunkKind::AudioSegment,
+                text: None,
+                start_byte: None,
+                end_byte: None,
+                t_start_ms: Some(0),
+                t_end_ms: Some(30000),
+            },
+        )
+        .unwrap();
+    store
+        .insert_vec(&tx, chunk_id, &embedding, FileKind::Audio, "wav", MTIME, "Documents")
+        .unwrap();
+    // Second segment with no end timestamp: renders `[mm:ss–?]`.
+    let chunk2 = store
+        .insert_chunk(
+            &tx,
+            NewChunk {
+                file_id,
+                ordinal: 1,
+                page: None,
+                kind: ChunkKind::AudioSegment,
+                text: None,
+                start_byte: None,
+                end_byte: None,
+                t_start_ms: Some(30000),
+                t_end_ms: None,
+            },
+        )
+        .unwrap();
+    store
+        .insert_vec(&tx, chunk2, &embedding, FileKind::Audio, "wav", MTIME, "Documents")
+        .unwrap();
+    tx.commit().unwrap();
+    KEEP.with(|k| k.borrow_mut().push(dir));
+    (store, cfg, fake)
+}
+
+#[test]
+fn search_returns_timestamped_audio_hits() {
+    let (store, cfg, fake) = audio_fixture();
+    let parsed = parse_query("sine tone", &FilterFlags::default()).unwrap();
+    let req = SearchRequest {
+        parsed,
+        mode: SearchMode::Hybrid,
+        limit: 20,
+        min_score: 0.0,
+        json: true,
+    };
+    let out = run_search(&store, &fake, &cfg, req).unwrap();
+    let v: serde_json::Value = serde_json::from_str(&render_json(&out)).unwrap();
+    let hits = v["hits"].as_array().unwrap();
+    assert!(!hits.is_empty());
+    assert!(
+        hits
+            .iter()
+            .all(|h| h["chunk_kind"] == "audio_segment")
+    );
+    assert!(
+        hits
+            .iter()
+            .all(|h| h["page"].is_null() && h["snippet_spans"] == serde_json::json!([]))
+    );
+    assert!(hits.iter().all(|h| h["scores"]["fts"].is_null()));
+    let snips: Vec<&str> = hits
+        .iter()
+        .map(|h| h["snippet"].as_str().unwrap())
+        .collect();
+    assert!(snips.contains(&"[00:00–00:30] sweep.wav"), "got {snips:?}");
+    assert!(snips.contains(&"[00:30–?] sweep.wav"), "got {snips:?}");
+}

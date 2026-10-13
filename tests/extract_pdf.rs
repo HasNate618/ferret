@@ -85,7 +85,6 @@ fn render_page_writes_png_under_cache() {
     assert_eq!(png, tmp.path().join("pages/41-1.png"));
     let bytes = std::fs::read(&png).unwrap();
     let img = image::load_from_memory_with_format(&bytes, image::ImageFormat::Png).unwrap();
-    use image::GenericImageView;
     assert!(img.width() > 0 && img.height() > 0);
 }
 

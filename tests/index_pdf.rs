@@ -31,7 +31,7 @@ fn run_json(cfg: &ferret::config::Config) -> (ferret::index::IndexSummary, Strin
     let mut stdout: Vec<u8> = Vec::new();
     let mut stderr: Vec<u8> = Vec::new();
     let summary = ferret::index::run(
-        &cfg,
+        cfg,
         &fake_for(cfg),
         vec![],
         true,

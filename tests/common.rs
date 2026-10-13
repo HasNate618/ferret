@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use ferret::paths::FerretDirs;
 use std::path::PathBuf;
 

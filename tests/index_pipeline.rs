@@ -5,7 +5,6 @@ mod common;
 
 use ferret::cli::try_run;
 use rusqlite::OptionalExtension;
-use std::path::PathBuf;
 
 /// Read `config_fingerprint` straight from the index meta table.
 fn meta_fingerprint(index: &std::path::Path) -> String {
@@ -44,7 +43,7 @@ fn rewrite_cfg(env: &common::TestEnv, body: &str) {
 #[test]
 #[serial_test::serial]
 fn index_markdown_then_search() {
-    let env = common::test_env();
+    let _env = common::test_env();
     try_run(&["ferret", "index"]).unwrap();
     let out = try_run(&["ferret", "search", "--json", "pets"]).unwrap();
     let v: serde_json::Value = serde_json::from_str(&out.stdout).unwrap();
@@ -170,7 +169,7 @@ fn index_strict_fails_on_extract_errors() {
 #[test]
 #[serial_test::serial]
 fn status_minimal_after_index() {
-    let env = common::test_env();
+    let _env = common::test_env();
     try_run(&["ferret", "index"]).unwrap();
     let out = try_run(&["ferret", "status", "--json"]).unwrap();
     let v: serde_json::Value = serde_json::from_str(&out.stdout).unwrap();

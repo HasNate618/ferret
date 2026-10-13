@@ -69,17 +69,34 @@ verbatim. It never shuts the child down. Health is
 
 ### Backends
 
-| `embedder.backend` | Images | Notes |
-|---|---|---|
-| `llama_server` (default) | yes, with `--mmproj` | v1 default |
-| `litert_lm` | yes, if probe succeeds | same HTTP as llama_server |
-| `sglang` | yes | `{text, image}` items, `<\|image\|>` marker |
-| `openai` | **no** | text-only; image files skip, PDF pages embed as text |
+| `embedder.backend` | Images | Audio | Notes |
+|---|---|---|---|
+| `llama_server` (default) | yes, with `--mmproj` | yes, with `--mmproj` | v1 default |
+| `litert_lm` | yes, if probe succeeds | **no** (unconfirmed over HTTP) | same HTTP as llama_server |
+| `sglang` | yes | **no** (needs native `/encode`) | `{text, image}` items, `<\|image\|>` marker |
+| `openai` | **no** | **no** | text-only; image/audio files skip, PDF pages embed as text |
 
 Non-local backends **upload** your file bytes. `ferret init` and
 `ferret index` print a stderr warning when the merged backend is
 `openai` or `sglang`. Set `embedder.multimodal = true/false` to
 override the image probe.
+
+## Audio
+
+Audio files (`.mp3 .wav .flac .ogg .opus .m4a .aac`) index as one
+vector row per ~30s segment (`chunk.audio.segment_secs`, default 30),
+no transcription: segments are cut with `ffmpeg` to 16kHz mono WAV,
+embedded through the model's native audio encoder (Appendix B.6),
+and searchable with plain text queries. Hits carry `[mm:ss–mm:ss]`
+stamps in `snippet` and `chunk_kind: "audio_segment"`.
+
+Requirements: `ffmpeg` + `ffprobe` on `PATH` (or
+`extract.ffmpeg_dir`), and the `llama_server` backend with `--mmproj`
+— the only backend that embeds audio (`sglang` needs a native
+`/encode` endpoint, `openai`/`litert_lm` refuse; the lab wrapper's
+typed-items `/v1/embed` dialect is a later milestone). Without
+ffmpeg, audio files walk-skip (`reason=no_ffmpeg`); without audio
+support, they persist a `no_audio_backend` skip row.
 
 ## CLI
 

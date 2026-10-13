@@ -25,7 +25,7 @@ Success for v1: `ferret search --json 'the clause about pets in the lease' --kin
 ### 1.1 Non-goals (v1)
 
 - Hosting or bundling EmbeddingGemma 2, llama.cpp, LiteRT, or PyTorch.
-- Audio or video. v1 schema file kinds are only `text|image|pdf`; chunk kinds are only `text|image|pdf_page`.
+- Audio queries (searching *by* a sound clip); video of any kind. File kinds are `text|image|pdf|audio`; chunk kinds are `text|image|pdf_page|audio_segment`.
 - A menubar/GUI, Quickshell QML in-tree, or a long-running ferret daemon/socket.
 - `inotify` watch / incremental daemon (`watch` is post-v1).
 - DigUp-style isolated code index, OCR, Office/LibreOffice decks, docx/odt readers.
@@ -173,12 +173,13 @@ Extractors never embed. They return chunks. Index embeds each chunk.
 | `text` | `.txt .md .markdown .rst .org .html .htm .csv` plus source: `.rs .go .py .js .ts .tsx .jsx .c .h .cpp .java .sh .toml .yaml .yml .json .nix .lua .css .svg` (svg as text) | Sliding windows of text |
 | `image` | `.jpg .jpeg .png .webp .gif .bmp`; `.heic .heif` only when `files.heic = "magick"` | One image chunk |
 | `pdf` | `.pdf` | One chunk per page |
+| `audio` | `.mp3 .wav .flac .ogg .opus .m4a .aac` | One chunk per ~30s segment (`chunk.audio.segment_secs`), 16kHz mono WAV |
 
 Unknown extensions are **walk-skip** (no new `files` row) unless the user adds them via `[files.extension_kind]`. If that path is already in the DB, `index` **deletes** it (same as a skip-rule tombstone).
 
 HTML: strip tags and decode entities; remaining text is `text` chunks. JSON/YAML/TOML: raw UTF-8 as text (no pretty-printer).
 
-Unsupported in v1 (walk-skip, including `.docx .odt .pptx`, rasterizing `.svg`, audio, video, archives): same as unknown extensions. `.svg` is indexed as **text** (source), never as an image. `.heic` / `.heif` are walk-skip when `files.heic = "skip"` (default).
+Unsupported in v1 (walk-skip, including `.docx .odt .pptx`, rasterizing `.svg`, video, archives): same as unknown extensions. `.svg` is indexed as **text** (source), never as an image. `.heic` / `.heif` are walk-skip when `files.heic = "skip"` (default).
 
 Walk order after extension typing:
 

@@ -24,10 +24,11 @@
             # feature is ever enabled.)
             SSL_CERT_FILE = "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt";
             # poppler-utils on PATH: pdfinfo/pdftotext/pdftoppm for PDFs.
+            # ffmpeg on PATH: ffmpeg/ffprobe for audio segments.
             # No ImageMagick here (see nixosModules.ferret heicMagick).
             postInstall = ''
               wrapProgram $out/bin/ferret --prefix PATH : ${
-                pkgs.lib.makeBinPath [ pkgs.poppler-utils ]
+                pkgs.lib.makeBinPath [ pkgs.poppler-utils pkgs.ffmpeg ]
               }
             '';
             meta = {
@@ -51,6 +52,7 @@
               pkgs.rustfmt
               pkgs.pkg-config
               pkgs.poppler-utils
+              pkgs.ffmpeg
             ];
           };
         });

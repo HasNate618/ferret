@@ -5,6 +5,7 @@
 
 use crate::types::ChunkKind;
 
+pub mod audio;
 pub mod image;
 pub mod pdf;
 pub mod text;

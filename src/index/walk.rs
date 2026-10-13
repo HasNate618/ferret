@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 use globset::{GlobSet, GlobSetBuilder};
 use ignore::gitignore::{Gitignore, GitignoreBuilder};
 
-use crate::config::{FilesConfig, RootEntry};
+use crate::config::{ExtractConfig, FilesConfig, RootEntry};
 use crate::error::{Error, Result};
 use crate::types::FileKind;
 
@@ -92,12 +92,24 @@ pub fn kind_for_ext(
 /// Walk every configured root plus the extra paths, returning events in a
 /// deterministic (name-sorted) order. With `only`, the roots loop is
 /// skipped but `roots` still drives extra-path collection inheritance.
+/// Map `extract.ffmpeg_dir` (empty = PATH lookup) to the `Option<&Path>`
+/// [`crate::extract::audio::find_ffmpeg`] takes. Shared by the walk gate
+/// and the index dispatch so both resolve identically.
+pub fn ffmpeg_dir_opt(cfg: &ExtractConfig) -> Option<&Path> {
+    if cfg.ffmpeg_dir.is_empty() {
+        None
+    } else {
+        Some(Path::new(&cfg.ffmpeg_dir))
+    }
+}
+
 pub fn walk(
     roots: &[RootEntry],
     extra: &[PathBuf],
     files_cfg: &FilesConfig,
     follow_symlinks: bool,
     only: bool,
+    ffmpeg_dir: Option<&Path>,
 ) -> Result<Vec<WalkEvent>> {
     let exclude = build_globset(&files_cfg.exclude_globs)?;
     let include = if files_cfg.include_globs.is_empty() {
@@ -109,6 +121,7 @@ pub fn walk(
 
     let mut w = Walker {
         files_cfg,
+        ffmpeg_dir,
         exclude,
         include,
         sensitive,
@@ -188,6 +201,7 @@ where
 
 struct Walker<'a> {
     files_cfg: &'a FilesConfig,
+    ffmpeg_dir: Option<&'a Path>,
     exclude: GlobSet,
     include: Option<GlobSet>,
     sensitive: GlobSet,
@@ -302,6 +316,13 @@ impl Walker<'_> {
                 return Ok(());
             }
         };
+        // NoFfmpeg gate: audio files with no ffmpeg/ffprobe resolvable
+        // (explicit `extract.ffmpeg_dir` or PATH). Decided here, like the
+        // NoMagick gate, so the indexer never sees them.
+        if kind == FileKind::Audio && crate::extract::audio::find_ffmpeg(self.ffmpeg_dir).is_err() {
+            self.skip(path, SkipReason::NoFfmpeg);
+            return Ok(());
+        }
         // NoMagick gate (spec §4.3): heic/heif that would need conversion
         // with no converter on PATH. An explicit non-image mapping
         // bypasses it — the file is read as that kind, never converted.

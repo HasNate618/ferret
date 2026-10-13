@@ -3,8 +3,11 @@
 use ferret::config::{FilesConfig, compiled_defaults};
 use ferret::index::walk::{SkipReason, WalkEvent, kind_for_ext, walk};
 use ferret::types::FileKind;
+use serial_test::serial;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+
+mod common;
 
 fn files_cfg() -> FilesConfig {
     compiled_defaults(&ferret_test_dirs()).files
@@ -30,7 +33,7 @@ fn root_entry(root: &Path) -> ferret::config::RootEntry {
 }
 
 fn walk_one(root: &Path) -> Vec<WalkEvent> {
-    walk(&[root_entry(root)], &[], &files_cfg(), false, false).unwrap()
+    walk(&[root_entry(root)], &[], &files_cfg(), false, false, None).unwrap()
 }
 
 fn fixture_tree() -> (tempfile::TempDir, PathBuf) {
@@ -73,7 +76,7 @@ fn hidden_skipped_unless_include_hidden() {
     // With include_hidden the hidden file is walked instead.
     let mut cfg = files_cfg();
     cfg.include_hidden = true;
-    let ev = walk(&[root_entry(&root)], &[], &cfg, false, false).unwrap();
+    let ev = walk(&[root_entry(&root)], &[], &cfg, false, false, None).unwrap();
     assert!(
         ev.iter()
             .any(|e| matches!(e, WalkEvent::File { path, .. } if path.ends_with("a.txt")))
@@ -85,7 +88,7 @@ fn include_globs_skips_non_matching() {
     let (_tmp, root) = fixture_tree();
     let mut cfg = files_cfg();
     cfg.include_globs = vec!["*.md".into()];
-    let ev = walk(&[root_entry(&root)], &[], &cfg, false, false).unwrap();
+    let ev = walk(&[root_entry(&root)], &[], &cfg, false, false, None).unwrap();
     assert!(ev.iter().any(|e| matches!(
         e,
         WalkEvent::Skip {
@@ -107,7 +110,7 @@ fn gitignore_skip() {
     std::fs::write(root.join(".gitignore"), "skipme.txt\n").unwrap();
     std::fs::write(root.join("skipme.txt"), "x").unwrap();
     std::fs::write(root.join("keep.md"), "y").unwrap();
-    let ev = walk(&[root_entry(&root)], &[], &files_cfg(), false, false).unwrap();
+    let ev = walk(&[root_entry(&root)], &[], &files_cfg(), false, false, None).unwrap();
     assert!(ev.iter().any(|e| matches!(
         e,
         WalkEvent::Skip {
@@ -130,6 +133,7 @@ fn extra_path_under_root_inherits_collection() {
         &files_cfg(),
         false,
         false,
+        None,
     )
     .unwrap();
     let file = ev
@@ -158,6 +162,8 @@ fn skip_reason_strings_match_spec() {
     assert_eq!(SkipReason::NoImageBackend.as_str(), "no_image_backend");
     assert_eq!(SkipReason::HeicSkip.as_str(), "heic_skip");
     assert_eq!(SkipReason::NoMagick.as_str(), "no_magick");
+    assert_eq!(SkipReason::NoFfmpeg.as_str(), "no_ffmpeg");
+    assert_eq!(SkipReason::NoAudioBackend.as_str(), "no_audio_backend");
     assert_eq!(SkipReason::Gitignore.as_str(), "gitignore");
     assert_eq!(SkipReason::IncludeGlobs.as_str(), "include_globs");
 }
@@ -206,7 +212,7 @@ fn gitignored_directory_pruned() {
     std::fs::write(root.join(".gitignore"), "build/\n").unwrap();
     std::fs::write(root.join("build/out.bin"), "x").unwrap();
     std::fs::write(root.join("keep.md"), "y").unwrap();
-    let ev = walk(&[root_entry(&root)], &[], &files_cfg(), false, false).unwrap();
+    let ev = walk(&[root_entry(&root)], &[], &files_cfg(), false, false, None).unwrap();
     // The directory is reported skipped and its contents are not walked.
     assert!(ev.iter().any(|e| matches!(
         e,
@@ -228,7 +234,7 @@ fn exclude_globs_and_max_size_are_skip_rules() {
     let mut cfg = files_cfg();
     cfg.exclude_globs = vec!["*.log".into()];
     cfg.max_size = 5;
-    let ev = walk(&[root_entry(&root)], &[], &cfg, false, false).unwrap();
+    let ev = walk(&[root_entry(&root)], &[], &cfg, false, false, None).unwrap();
     assert!(ev.iter().any(|e| matches!(
         e,
         WalkEvent::Skip { path, reason: SkipReason::SkipRule } if path.ends_with("x.log")
@@ -247,7 +253,7 @@ fn no_git_dir_means_no_gitignore_skips() {
     std::fs::create_dir_all(&root).unwrap();
     std::fs::write(root.join(".gitignore"), "keep.md\n").unwrap();
     std::fs::write(root.join("keep.md"), "y").unwrap();
-    let ev = walk(&[root_entry(&root)], &[], &files_cfg(), false, false).unwrap();
+    let ev = walk(&[root_entry(&root)], &[], &files_cfg(), false, false, None).unwrap();
     assert!(
         ev.iter()
             .any(|e| matches!(e, WalkEvent::File { path, .. } if path.ends_with("keep.md")))
@@ -272,7 +278,7 @@ fn explicit_heic_mapping_wins_over_magick_default() {
     cfg.heic = HeicMode::Magick;
     cfg.extension_kind
         .insert("heic".to_string(), FileKind::Text);
-    let ev = walk(&[root_entry(&root)], &[], &cfg, false, false).unwrap();
+    let ev = walk(&[root_entry(&root)], &[], &cfg, false, false, None).unwrap();
     assert!(ev.iter().any(|e| matches!(
         e,
         WalkEvent::File { kind: FileKind::Text, ext, .. } if ext == "heic"
@@ -293,7 +299,7 @@ fn heic_magick_mode_types_unmapped_heic_as_image() {
     std::fs::write(root.join("pic.heic"), "x").unwrap();
     let mut cfg = files_cfg();
     cfg.heic = HeicMode::Magick;
-    let ev = walk(&[root_entry(&root)], &[], &cfg, false, false).unwrap();
+    let ev = walk(&[root_entry(&root)], &[], &cfg, false, false, None).unwrap();
     assert!(ev.iter().any(|e| matches!(
         e,
         WalkEvent::File { kind: FileKind::Image, ext, .. } if ext == "heic"
@@ -327,4 +333,69 @@ fn host_has_magick() -> bool {
                     .any(|bin| is_exec(&dir.join(bin)))
             })
     })
+}
+
+#[test]
+#[serial]
+fn audio_without_ffmpeg_is_no_ffmpeg_skip() {
+    use common::EnvGuard;
+    // Empty PATH: no ffmpeg/ffprobe resolvable, so the wav walk-skips
+    // instead of erroring (whatever the host has installed).
+    let tmp = tempfile::tempdir().unwrap();
+    let empty = tmp.path().join("empty");
+    std::fs::create_dir_all(&empty).unwrap();
+    let root = tmp.path().join("c");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join("clip.wav"), "RIFF").unwrap();
+    let _path = EnvGuard::set("PATH", empty.to_str().unwrap());
+    let ev = walk(&[root_entry(&root)], &[], &files_cfg(), false, false, None).unwrap();
+    assert!(ev.iter().any(|e| matches!(
+        e,
+        WalkEvent::Skip { reason: SkipReason::NoFfmpeg, path } if path.ends_with("clip.wav")
+    )));
+    assert!(!ev.iter().any(|e| matches!(e, WalkEvent::File { .. })));
+}
+
+#[test]
+#[serial]
+fn audio_with_explicit_ffmpeg_dir_walks_despite_empty_path() {
+    use common::EnvGuard;
+    let tmp = tempfile::tempdir().unwrap();
+    let empty = tmp.path().join("empty");
+    let tools = tmp.path().join("tools");
+    std::fs::create_dir_all(&empty).unwrap();
+    std::fs::create_dir_all(&tools).unwrap();
+    for name in ["ffmpeg", "ffprobe"] {
+        let p = tools.join(name);
+        std::fs::write(&p, "#!/bin/sh\nexit 0\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = std::fs::metadata(&p).unwrap().permissions();
+            perms.set_mode(0o755);
+            std::fs::set_permissions(&p, perms).unwrap();
+        }
+        std::fs::File::open(&p).unwrap().sync_all().unwrap();
+    }
+    std::fs::File::open(&tools).unwrap().sync_all().unwrap();
+    let root = tmp.path().join("c");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join("clip.wav"), "RIFF").unwrap();
+    let _path = EnvGuard::set("PATH", empty.to_str().unwrap());
+    let ev = walk(
+        &[root_entry(&root)],
+        &[],
+        &files_cfg(),
+        false,
+        false,
+        Some(tools.as_path()),
+    )
+    .unwrap();
+    assert!(ev.iter().any(|e| matches!(
+        e,
+        WalkEvent::File {
+            kind: FileKind::Audio,
+            ..
+        }
+    )));
 }

@@ -33,6 +33,7 @@ pub struct HttpEmbedder {
     client: Client,
     cfg: Config,
     images: OnceLock<bool>,
+    audio: OnceLock<bool>,
 }
 
 impl HttpEmbedder {
@@ -51,6 +52,7 @@ impl HttpEmbedder {
             client,
             cfg: cfg.clone(),
             images: OnceLock::new(),
+            audio: OnceLock::new(),
         })
     }
 
@@ -304,6 +306,23 @@ impl Embedder for HttpEmbedder {
             if !ok {
                 eprintln!(
                     "warning: embedder at {} shows no image support; image files will be skipped",
+                    self.cfg.embedder.endpoint,
+                );
+            }
+            ok
+        })
+    }
+
+    fn audio_supported(&self) -> bool {
+        *self.audio.get_or_init(|| {
+            if self.cfg.embedder.multimodal == Some(false) {
+                return false;
+            }
+            // probe_audio gates non-llama backends itself (false, no dial).
+            let ok = probe::probe_audio(&self.client, &self.cfg);
+            if !ok {
+                eprintln!(
+                    "warning: embedder at {} shows no audio support; audio files will be skipped",
                     self.cfg.embedder.endpoint,
                 );
             }

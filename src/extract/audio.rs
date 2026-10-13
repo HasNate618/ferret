@@ -110,15 +110,16 @@ pub fn extract_audio(
     ffmpeg_dir: Option<&Path>,
 ) -> Result<ExtractOutcome> {
     if segment_secs == 0 {
-        return Err(Error::fatal("extract_audio: segment_secs must be at least 1"));
+        return Err(Error::fatal(
+            "extract_audio: segment_secs must be at least 1",
+        ));
     }
     let duration = audio_duration(ffmpeg_dir, path)?;
     let ffmpeg = find_ffmpeg(ffmpeg_dir)?;
     let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     let dir = cache_dir.join("audio");
-    std::fs::create_dir_all(&dir).map_err(|e| {
-        Error::file(format!("cannot create audio cache {}: {e}", dir.display()))
-    })?;
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| Error::file(format!("cannot create audio cache {}: {e}", dir.display())))?;
     // Scope clip names to the file so concurrent files never collide.
     let hash = blake3::hash(canonical.to_string_lossy().as_bytes()).to_hex();
     let tag = &hash[..16.min(hash.len())];
@@ -176,7 +177,13 @@ pub fn extract_audio(
             clean_partials(&written);
             Error::file(format!("cannot read segment {}: {e}", clip.display()))
         })?;
-        written.push(clip);
+        written.push(clip.clone());
+        // Clips are scratch: bytes are already in memory, so remove each
+        // segment right after reading it. Success leaves nothing behind
+        // (no post-commit sweep needed, unlike PDF rasters which the
+        // embed path reads from disk); `clean_partials` stays as the
+        // error-path net for races.
+        let _ = std::fs::remove_file(&clip);
         chunks.push(Chunk {
             kind: ChunkKind::AudioSegment,
             text: None,

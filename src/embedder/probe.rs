@@ -86,9 +86,7 @@ pub fn probe_images(client: &Client, cfg: &Config) -> bool {
 /// with tests so the probe-body mock can assert the exact base64.
 pub fn probe_wav() -> Vec<u8> {
     let samples: Vec<i16> = (0..16000)
-        .map(|i| {
-            (i as f32 * 440.0 * std::f32::consts::TAU / 16000.0).sin() * (i16::MAX as f32)
-        })
+        .map(|i| (i as f32 * 440.0 * std::f32::consts::TAU / 16000.0).sin() * (i16::MAX as f32))
         .map(|s| s as i16)
         .collect();
     let data_len = (samples.len() * 2) as u32;
@@ -128,8 +126,7 @@ pub fn probe_audio(client: &Client, cfg: &Config) -> bool {
             v.pointer("/data/0/embedding")
                 .and_then(|e| e.as_array())
                 .is_some_and(|a| {
-                    a.len() == 768
-                        && a.iter().all(|v| v.as_f64().is_some_and(|f| f.is_finite()))
+                    a.len() == 768 && a.iter().all(|v| v.as_f64().is_some_and(|f| f.is_finite()))
                 })
         }),
         _ => false,

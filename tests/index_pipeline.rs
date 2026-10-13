@@ -331,14 +331,132 @@ fn index_only_cli_indexes_given_path() {
 
 #[test]
 #[serial_test::serial]
-fn audio_supported_meta_defaults_false() {
+fn audio_supported_meta_recorded_with_fake() {
     let env = common::test_env();
     try_run(&["ferret", "index"]).unwrap();
     let conn = rusqlite::Connection::open(&env.index).unwrap();
     let v: String = conn
-        .query_row("SELECT value FROM meta WHERE key = 'audio_supported'", [], |r| {
-            r.get(0)
-        })
+        .query_row(
+            "SELECT value FROM meta WHERE key = 'audio_supported'",
+            [],
+            |r| r.get(0),
+        )
         .unwrap();
-    assert_eq!(v, "false");
+    assert_eq!(v, "true");
+}
+
+#[test]
+#[serial_test::serial]
+fn audio_indexes_segments_with_fake_embedder() {
+    use ferret::extract::audio::find_ffmpeg;
+    if find_ffmpeg(None).is_err() {
+        eprintln!("skip: no ffmpeg");
+        return;
+    }
+    let env = common::test_env();
+    std::fs::copy("testdata/sweep.wav", env.root.join("sweep.wav")).unwrap();
+    try_run(&["ferret", "index"]).unwrap();
+    let conn = rusqlite::Connection::open(&env.index).unwrap();
+    let n: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM chunks WHERE kind = 'audio_segment'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(n, 3);
+    let ts: Vec<(Option<i64>, Option<i64>)> = conn
+        .prepare(
+            "SELECT t_start_ms, t_end_ms FROM chunks WHERE kind = 'audio_segment' ORDER BY ordinal",
+        )
+        .unwrap()
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(
+        ts,
+        vec![
+            (Some(0), Some(30000)),
+            (Some(30000), Some(60000)),
+            (Some(60000), Some(65000))
+        ]
+    );
+    let vecs: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM chunks_vec WHERE rowid IN (SELECT id FROM chunks WHERE kind = 'audio_segment')",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(vecs, 3);
+    // FTS rows exist (filename/path for `--name`, like images) but carry
+    // no text: the trigger fires for every chunk, text is NULL.
+    let fts: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM chunks_fts WHERE rowid IN (SELECT id FROM chunks WHERE kind = 'audio_segment')",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(fts, 3);
+    let fts_text: Option<String> = conn
+        .query_row(
+            "SELECT text FROM chunks_fts WHERE rowid IN (SELECT id FROM chunks WHERE kind = 'audio_segment' LIMIT 1)",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert!(fts_text.is_none());
+    let sup: String = conn
+        .query_row(
+            "SELECT value FROM meta WHERE key = 'audio_supported'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(sup, "true");
+}
+
+#[test]
+#[serial_test::serial]
+fn audio_without_audio_backend_is_capability_skip() {
+    use common::EnvGuard;
+    use ferret::extract::audio::find_ffmpeg;
+    if find_ffmpeg(None).is_err() {
+        eprintln!("skip: no ffmpeg");
+        return;
+    }
+    // openai backend: no images, no audio (probe short-circuits, no dial).
+    // A live /health mock keeps build_embedder's startup gate green.
+    let server = httpmock::MockServer::start();
+    let health = server.mock(|when, then| {
+        when.method("GET").path("/health");
+        then.status(200);
+    });
+    let env = common::test_env();
+    std::fs::copy("testdata/sweep.wav", env.root.join("sweep.wav")).unwrap();
+    let _not_fake = EnvGuard::set("FERRET_EMBEDDER", "http");
+    let _endpoint = EnvGuard::set("FERRET__EMBEDDER__ENDPOINT", &server.base_url());
+    let _backend = EnvGuard::set("FERRET__EMBEDDER__BACKEND", "openai");
+    try_run(&["ferret", "index"]).unwrap();
+    health.assert();
+    let conn = rusqlite::Connection::open(&env.index).unwrap();
+    let (complete, reason): (bool, Option<String>) = conn
+        .query_row(
+            "SELECT complete, skip_reason FROM files WHERE path LIKE '%sweep.wav'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert!(complete);
+    assert_eq!(reason.as_deref(), Some("no_audio_backend"));
+    let n: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM chunks WHERE kind = 'audio_segment'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(n, 0);
 }

@@ -16,8 +16,12 @@ pub enum SkipReason {
     HeicSkip,
     /// `files.heic = "magick"` but no `magick` / `convert` on PATH (Task 14).
     NoMagick,
+    /// Audio file but no `ffmpeg` / `ffprobe` resolvable (audio milestone).
+    NoFfmpeg,
     /// A gitignore rule matched inside a git repo.
     Gitignore,
+    /// Audio file no backend can embed (capability probe said no audio).
+    NoAudioBackend,
     /// A non-empty `include_globs` and the relative path matched none.
     IncludeGlobs,
 }
@@ -31,7 +35,9 @@ impl SkipReason {
             Self::NoImageBackend => "no_image_backend",
             Self::HeicSkip => "heic_skip",
             Self::NoMagick => "no_magick",
+            Self::NoFfmpeg => "no_ffmpeg",
             Self::Gitignore => "gitignore",
+            Self::NoAudioBackend => "no_audio_backend",
             Self::IncludeGlobs => "include_globs",
         }
     }

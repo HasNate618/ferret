@@ -45,6 +45,10 @@ pub trait Embedder: Send + Sync {
         inputs.iter().cloned().map(|i| self.embed(i)).collect()
     }
     fn images_supported(&self) -> bool;
+    /// Audio capability, probed lazily by HTTP backends (default: none).
+    fn audio_supported(&self) -> bool {
+        false
+    }
 }
 
 /// Build the embedder for the merged config. `FERRET_EMBEDDER=fake` wins over

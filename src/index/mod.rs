@@ -55,6 +55,9 @@ pub fn run(
     check_collections(cfg, &extra_paths)?;
 
     let images_supported = embedder.images_supported();
+    // Audio probe dials once (cached); other backends refuse without
+    // dialing. Recorded per run like `images_supported`.
+    let audio_supported = embedder.audio_supported();
     let store = store::open(&cfg.index.path, cfg, images_supported)?;
     let config_fp = fingerprint::config_fingerprint(cfg, images_supported);
 
@@ -74,6 +77,7 @@ pub fn run(
         &cfg.files,
         cfg.files.follow_symlinks,
         only,
+        walk::ffmpeg_dir_opt(&cfg.extract),
     )?;
     summary.seen = events.len() as u64;
 
@@ -129,6 +133,7 @@ pub fn run(
                 cfg,
                 &config_fp,
                 images_supported,
+                audio_supported,
                 &dirs.cache_dir,
                 EventSink {
                     json: json_ndjson,
@@ -175,6 +180,10 @@ pub fn run(
     store.set_meta(
         "images_supported",
         if images_supported { "true" } else { "false" },
+    )?;
+    store.set_meta(
+        "audio_supported",
+        if audio_supported { "true" } else { "false" },
     )?;
 
     if strict && summary.errors > 0 {
@@ -1025,6 +1034,7 @@ fn index_file(
     cfg: &Config,
     config_fp: &str,
     images_supported: bool,
+    audio_supported: bool,
     cache_dir: &Path,
     mut sink: EventSink<'_>,
     path: PathBuf,
@@ -1061,12 +1071,12 @@ fn index_file(
     let size = metadata.len();
     let file_fp = fingerprint::file_fingerprint(&path_str, mtime, size, config_fp);
 
-    // Capability skips: the walk does not know the embedder, so an image
-    // file no backend can embed is skipped here with its NDJSON reason.
-    // Unlike walk-skips, these persist a complete row carrying
-    // `skip_reason`: a later probe flip must find and re-evaluate the
-    // file (spec §9: skip, not error). (HEIC converter absence is a
-    // walk-skip decided in `walk`, not here.)
+    // Capability skips: the walk does not know the embedder, so files no
+    // backend can embed are skipped here with NDJSON reasons. Unlike
+    // walk-skips, these persist a complete row carrying `skip_reason`:
+    // a later probe flip must find and re-evaluate the file (spec §9:
+    // skip, not error). (HEIC converter absence is a walk-skip decided
+    // in `walk`, not here; missing ffmpeg is likewise a walk-skip.)
     if kind == FileKind::Image && !images_supported {
         record_capability_skip(
             store,
@@ -1080,6 +1090,23 @@ fn index_file(
             mtime,
             &file_fp,
             SkipReason::NoImageBackend,
+            summary,
+        )?;
+        return Ok(());
+    }
+    if kind == FileKind::Audio && !audio_supported {
+        record_capability_skip(
+            store,
+            &mut sink,
+            &path,
+            &path_str,
+            &collection,
+            kind,
+            &ext,
+            size,
+            mtime,
+            &file_fp,
+            SkipReason::NoAudioBackend,
             summary,
         )?;
         return Ok(());
@@ -1166,21 +1193,29 @@ fn index_file(
             ));
         }
         FileKind::Audio => {
-            // Transient (audio milestone Task 6 wires the real arm): the
-            // kind resolves from Task 1, so record-and-continue rather
-            // than fatal on audio files met before then.
-            record_extract_error(
-                store,
-                &mut sink,
+            let ffmpeg_dir = walk::ffmpeg_dir_opt(&cfg.extract);
+            match extract::audio::extract_audio(
                 &path,
-                &collection,
-                kind,
-                &ext,
-                config_fp,
-                Error::file("audio indexing is not wired yet (audio milestone Task 6)"),
-                summary,
-            )?;
-            return Ok(());
+                cfg.chunk.audio.segment_secs,
+                cache_dir,
+                ffmpeg_dir,
+            ) {
+                Ok(chunks) => chunks,
+                Err(e) => {
+                    record_extract_error(
+                        store,
+                        &mut sink,
+                        &path,
+                        &collection,
+                        kind,
+                        &ext,
+                        config_fp,
+                        e,
+                        summary,
+                    )?;
+                    return Ok(());
+                }
+            }
         }
     };
 
@@ -1194,8 +1229,9 @@ fn index_file(
         if !matches!(c.embed, EmbedDecision::Vec) {
             continue;
         }
-        // Image chunks carry their PNG bytes; everything else embeds as
-        // prefixed text (Task 15 adds the PdfPage arm).
+        // Image chunks carry their PNG bytes, audio chunks their WAV
+        // bytes; everything else embeds as prefixed text (Task 15 adds
+        // the PdfPage arm).
         if c.kind == crate::types::ChunkKind::Image {
             match &c.image_bytes {
                 Some(bytes) => inputs.push(EmbedInput::Image {
@@ -1205,6 +1241,18 @@ fn index_file(
                 None => {
                     return Err(Error::fatal(format!(
                         "image chunk for {} has no PNG bytes",
+                        path.display()
+                    )));
+                }
+            }
+        } else if c.kind == crate::types::ChunkKind::AudioSegment {
+            match &c.image_bytes {
+                Some(bytes) => inputs.push(EmbedInput::Audio {
+                    wav_bytes: bytes.clone(),
+                }),
+                None => {
+                    return Err(Error::fatal(format!(
+                        "audio chunk for {} has no WAV bytes",
                         path.display()
                     )));
                 }

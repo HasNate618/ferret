@@ -68,4 +68,8 @@ impl Embedder for FakeEmbedder {
     fn images_supported(&self) -> bool {
         true
     }
+
+    fn audio_supported(&self) -> bool {
+        true
+    }
 }

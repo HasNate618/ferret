@@ -68,3 +68,4 @@ Status: `pending` | `active` | `done` | `blocked` | `parked`.
 - Audio Task 1: done. SPEC+QUALITY conditional pass, deviations accepted (ffmpeg_dir String mirrors poppler; transient audio arm safe). 3 P1 + 1 P2 fixed: ffmpeg_dir env layer + test, audio_pipeline_json + set_meta, Appendix A example + kind registries.
 - Audio Task 2: done. SPEC PASS, QUALITY PASS + 2 P2 test gaps closed (explicit-dir missing binary, 0/nan/inf gate). find_ffprobe stays pub for the Task 6 index arm.
 - Audio Task 3: done. SPEC OK, QUALITY OK + P2 fixed (error-path partial-clip cleanup with stub test). Symlink-guard divergence + 0-seg guard ruled no-change.
+- Audio Task 4: done. SPEC PASS, QUALITY PASS + P2 fixed (finite check in 768 gate).

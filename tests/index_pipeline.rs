@@ -135,10 +135,15 @@ fn index_json_ndjson_events() {
         .filter(|l| !l.trim().is_empty())
         .collect();
     assert!(!lines.is_empty());
-    // v1.1: the first line is the plan event with progress totals.
+    // v1.1: the first line is the plan event with progress totals, the
+    // last line the summary event; every line between is a file event.
+    assert!(lines.len() >= 2, "expected plan + summary lines, got: {lines:?}");
     let plan: serde_json::Value = serde_json::from_str(lines[0]).unwrap();
     assert_eq!(plan["event"], "plan");
-    for line in &lines[1..] {
+    let summary: serde_json::Value =
+        serde_json::from_str(lines[lines.len() - 1]).unwrap();
+    assert_eq!(summary["event"], "summary");
+    for line in &lines[1..lines.len() - 1] {
         let v: serde_json::Value = serde_json::from_str(line).unwrap();
         assert_eq!(v["event"], "file");
         assert!(v["path"].is_string());
@@ -203,4 +208,35 @@ fn index_json_emits_plan_event_first() {
     let expected_bytes = std::fs::metadata(env.root.join("a.txt")).unwrap().len()
         + std::fs::metadata(env.root.join("b.txt")).unwrap().len();
     assert_eq!(first["bytes"], expected_bytes);
+}
+
+#[test]
+#[serial_test::serial]
+fn index_json_emits_summary_event_last() {
+    let env = common::test_env();
+    std::fs::remove_file(env.root.join("pets.md")).unwrap();
+    std::fs::write(env.root.join("a.txt"), "alpha beta gamma").unwrap();
+    std::fs::write(env.root.join("skip.bin"), [0u8, 1, 2, 3]).unwrap();
+    let cfg = ferret::config::load(&ferret::config::LoadOpts::default()).unwrap();
+    let embedder = FakeEmbedder::new_with_profile(
+        cfg.embedder.prefix_profile,
+        cfg.embedder.dimensions,
+    );
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+    ferret::index::run(&cfg, &embedder, vec![], true, false, &mut out, &mut err).unwrap();
+    let stdout = String::from_utf8(out).unwrap();
+    let last: serde_json::Value =
+        serde_json::from_str(stdout.lines().last().unwrap()).unwrap();
+    assert_eq!(last["event"], "summary");
+    assert_eq!(last["seen"], 2);
+    assert_eq!(last["embedded"], 1);
+    assert_eq!(last["errors"], 0);
+    assert_eq!(
+        last["skipped"],
+        stdout
+            .lines()
+            .filter(|l| l.contains("\"status\":\"skip\""))
+            .count() as u64
+    );
 }

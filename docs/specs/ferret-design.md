@@ -616,7 +616,7 @@ No embedder call.
 {"event":"file","path":"/abs/path","status":"error","reason":null,"error":"pdftotext not found"}
 ```
 
-`plan.files` counts walk File events only (walk-skips excluded); `plan.bytes` sums walked file sizes. Parsers MUST ignore unknown `event` values so future additive events never break them.
+`plan.files` counts walk File events only (walk-skips excluded); `plan.bytes` sums walked file sizes. The `summary` counters are the exact values the non-JSON stderr human summary prints (with `--json` the event replaces that stderr line). On `--strict` failure neither summary appears — the run errors out first. Parsers MUST ignore unknown `event` values so future additive events never break them.
 
 Exit codes:
 

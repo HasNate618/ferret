@@ -177,6 +177,22 @@ pub fn run(
             summary.errors
         )));
     }
+    // NDJSON `summary` event (spec §10): the last stdout line, with the
+    // exact counters the stderr human summary prints from this struct.
+    // (Emitted after the --strict gate: on that path neither appears.)
+    if json_ndjson {
+        writeln!(
+            out,
+            "{}",
+            serde_json::json!({
+                "event": "summary",
+                "seen": summary.seen,
+                "skipped": summary.skipped,
+                "embedded": summary.embedded,
+                "errors": summary.errors,
+            })
+        )?;
+    }
     Ok(summary)
 }
 

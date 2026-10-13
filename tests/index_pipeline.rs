@@ -137,11 +137,13 @@ fn index_json_ndjson_events() {
     assert!(!lines.is_empty());
     // v1.1: the first line is the plan event with progress totals, the
     // last line the summary event; every line between is a file event.
-    assert!(lines.len() >= 2, "expected plan + summary lines, got: {lines:?}");
+    assert!(
+        lines.len() >= 2,
+        "expected plan + summary lines, got: {lines:?}"
+    );
     let plan: serde_json::Value = serde_json::from_str(lines[0]).unwrap();
     assert_eq!(plan["event"], "plan");
-    let summary: serde_json::Value =
-        serde_json::from_str(lines[lines.len() - 1]).unwrap();
+    let summary: serde_json::Value = serde_json::from_str(lines[lines.len() - 1]).unwrap();
     assert_eq!(summary["event"], "summary");
     for line in &lines[1..lines.len() - 1] {
         let v: serde_json::Value = serde_json::from_str(line).unwrap();
@@ -193,16 +195,23 @@ fn index_json_emits_plan_event_first() {
     std::fs::write(env.root.join("a.txt"), "alpha beta gamma").unwrap();
     std::fs::write(env.root.join("b.txt"), "delta epsilon").unwrap();
     let cfg = ferret::config::load(&ferret::config::LoadOpts::default()).unwrap();
-    let embedder = FakeEmbedder::new_with_profile(
-        cfg.embedder.prefix_profile,
-        cfg.embedder.dimensions,
-    );
+    let embedder =
+        FakeEmbedder::new_with_profile(cfg.embedder.prefix_profile, cfg.embedder.dimensions);
     let mut out = Vec::new();
     let mut err = Vec::new();
-    ferret::index::run(&cfg, &embedder, vec![], true, false, false, &mut out, &mut err).unwrap();
+    ferret::index::run(
+        &cfg,
+        &embedder,
+        vec![],
+        true,
+        false,
+        false,
+        &mut out,
+        &mut err,
+    )
+    .unwrap();
     let stdout = String::from_utf8(out).unwrap();
-    let first: serde_json::Value =
-        serde_json::from_str(stdout.lines().next().unwrap()).unwrap();
+    let first: serde_json::Value = serde_json::from_str(stdout.lines().next().unwrap()).unwrap();
     assert_eq!(first["event"], "plan");
     assert_eq!(first["files"], 2);
     let expected_bytes = std::fs::metadata(env.root.join("a.txt")).unwrap().len()
@@ -218,16 +227,23 @@ fn index_json_emits_summary_event_last() {
     std::fs::write(env.root.join("a.txt"), "alpha beta gamma").unwrap();
     std::fs::write(env.root.join("skip.bin"), [0u8, 1, 2, 3]).unwrap();
     let cfg = ferret::config::load(&ferret::config::LoadOpts::default()).unwrap();
-    let embedder = FakeEmbedder::new_with_profile(
-        cfg.embedder.prefix_profile,
-        cfg.embedder.dimensions,
-    );
+    let embedder =
+        FakeEmbedder::new_with_profile(cfg.embedder.prefix_profile, cfg.embedder.dimensions);
     let mut out = Vec::new();
     let mut err = Vec::new();
-    ferret::index::run(&cfg, &embedder, vec![], true, false, false, &mut out, &mut err).unwrap();
+    ferret::index::run(
+        &cfg,
+        &embedder,
+        vec![],
+        true,
+        false,
+        false,
+        &mut out,
+        &mut err,
+    )
+    .unwrap();
     let stdout = String::from_utf8(out).unwrap();
-    let last: serde_json::Value =
-        serde_json::from_str(stdout.lines().last().unwrap()).unwrap();
+    let last: serde_json::Value = serde_json::from_str(stdout.lines().last().unwrap()).unwrap();
     assert_eq!(last["event"], "summary");
     assert_eq!(last["seen"], 2);
     assert_eq!(last["embedded"], 1);
@@ -261,10 +277,8 @@ fn index_only_skips_roots_walk() {
     )
     .unwrap();
     let cfg = ferret::config::load(&ferret::config::LoadOpts::default()).unwrap();
-    let embedder = FakeEmbedder::new_with_profile(
-        cfg.embedder.prefix_profile,
-        cfg.embedder.dimensions,
-    );
+    let embedder =
+        FakeEmbedder::new_with_profile(cfg.embedder.prefix_profile, cfg.embedder.dimensions);
     let mut out = Vec::new();
     let mut err = Vec::new();
     // --only path in B: A must never appear in NDJSON.

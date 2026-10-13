@@ -359,8 +359,17 @@ fn failed_page_two_keeps_committed_page_one() {
     };
     let mut stdout: Vec<u8> = Vec::new();
     let mut stderr: Vec<u8> = Vec::new();
-    let summary =
-        ferret::index::run(&cfg, &failer, vec![], true, false, false, &mut stdout, &mut stderr).unwrap();
+    let summary = ferret::index::run(
+        &cfg,
+        &failer,
+        vec![],
+        true,
+        false,
+        false,
+        &mut stdout,
+        &mut stderr,
+    )
+    .unwrap();
     assert_eq!(summary.errors, 1);
     // Page 1's chunk survives the page-2 failure (spec §9 partial file).
     assert_eq!(chunk_pages(&env.index, "doc.pdf"), vec![1]);

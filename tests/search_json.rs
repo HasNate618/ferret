@@ -268,8 +268,8 @@ fn search_json_no_vec_starved_when_hybrid_vec_contributes() {
     // covered deterministically by ..._vec_starved_when_only_fts_hits.)
     let _env = common::test_env();
     ferret::cli::try_run(&["ferret", "index"]).unwrap();
-    let out = ferret::cli::try_run(&["ferret", "search", "--json", "--name", "*.md", "pets"])
-        .unwrap();
+    let out =
+        ferret::cli::try_run(&["ferret", "search", "--json", "--name", "*.md", "pets"]).unwrap();
     let v: serde_json::Value = serde_json::from_str(&out.stdout).unwrap();
     let hits = v["hits"].as_array().unwrap();
     assert!(!hits.is_empty());
@@ -282,8 +282,7 @@ fn search_json_no_vec_starved_when_hybrid_vec_contributes() {
 fn search_json_browse_labels_no_vec() {
     let _env = common::test_env();
     ferret::cli::try_run(&["ferret", "index"]).unwrap();
-    let out =
-        ferret::cli::try_run(&["ferret", "search", "--json", "--kind", "text"]).unwrap();
+    let out = ferret::cli::try_run(&["ferret", "search", "--json", "--kind", "text"]).unwrap();
     let v: serde_json::Value = serde_json::from_str(&out.stdout).unwrap();
     assert!(
         v["warnings"]
@@ -338,8 +337,8 @@ fn search_json_spans_empty_for_image_hits() {
     )
     .unwrap();
     ferret::cli::try_run(&["ferret", "index"]).unwrap();
-    let out = ferret::cli::try_run(&["ferret", "search", "--json", "--kind", "image", "photo"])
-        .unwrap();
+    let out =
+        ferret::cli::try_run(&["ferret", "search", "--json", "--kind", "image", "photo"]).unwrap();
     let v: serde_json::Value = serde_json::from_str(&out.stdout).unwrap();
     let hits = v["hits"].as_array().unwrap();
     assert!(!hits.is_empty());

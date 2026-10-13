@@ -257,8 +257,7 @@ fn keyword_search_works_with_dead_endpoint() {
     let _not_fake = EnvGuard::set("FERRET_EMBEDDER", "http");
     let _dead = EnvGuard::set("FERRET__EMBEDDER__ENDPOINT", "http://127.0.0.1:9");
     let out =
-        ferret::cli::try_run(&["ferret", "search", "--json", "--mode", "keyword", "pets"])
-            .unwrap();
+        ferret::cli::try_run(&["ferret", "search", "--json", "--mode", "keyword", "pets"]).unwrap();
     let v: serde_json::Value = serde_json::from_str(&out.stdout).unwrap();
     assert!(!v["hits"].as_array().unwrap().is_empty());
 }

@@ -39,6 +39,7 @@ pub struct IndexSummary {
 /// continue (spec §4.5); `--strict` turns any error into exit 1 after the
 /// walk. Fatal failures (DB, embedder unreachable, schema/model mismatch)
 /// abort with the error.
+#[allow(clippy::too_many_arguments)]
 pub fn run(
     cfg: &Config,
     embedder: &dyn Embedder,

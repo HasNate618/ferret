@@ -208,6 +208,30 @@ fn under_filter_restricts_to_dir() {
 }
 
 #[test]
+fn under_filter_with_glob_metachars_matches_literal_root() {
+    // Regression: the `f.path = ?` equality leg must bind the raw path,
+    // not the GLOB-escaped form, or a literal `[` dir never equal-matches.
+    let root = tempfile::tempdir().unwrap();
+    let weird = root.path().join("a[b");
+    std::fs::create_dir_all(&weird).unwrap();
+    let h = harness();
+    add_file(
+        &h,
+        weird.to_str().unwrap(),
+        FileKind::Text,
+        ChunkKind::Text,
+        Some("pets here"),
+        None,
+    );
+    let flags = FilterFlags {
+        under: Some(weird.clone()),
+        ..Default::default()
+    };
+    let hits = search(&h, "pets", &flags);
+    assert_eq!(hits, vec![weird.to_str().unwrap().to_string()]);
+}
+
+#[test]
 fn name_filter_restricts_to_basename_glob() {
     let h = harness();
     add_file(

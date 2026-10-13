@@ -69,7 +69,9 @@ pub struct SearchOutput {
 ///    JOIN `files` (no second KNN loop).
 /// 3. Keyword arm: FTS5 MATCH on chunk text, same filters, capped.
 /// 4. Filename arm: FTS5 MATCH on filename/path only.
-/// 5. RRF (unless single-arm mode), drop `< min_score`, take `limit`.
+/// 5. RRF over the running arms, drop `< min_score`, take `limit`.
+///    (Single-arm searches fuse trivially; the fused weight is then a
+///    function of rank, and `min_score` applies to that fused weight.)
 pub fn run_search(
     store: &Store,
     embedder: &dyn Embedder,
@@ -126,6 +128,20 @@ pub fn run_search(
                     e
                 }
             })?;
+        // Mirror the write-path guard: never send a non-finite or
+        // wrong-width vector into the KNN MATCH.
+        if let Some(pos) = query_vec.iter().position(|f| !f.is_finite()) {
+            return Err(Error::fatal(format!(
+                "embedder returned non-finite query value at index {pos}"
+            )));
+        }
+        if query_vec.len() as u32 != store.dimensions {
+            return Err(Error::fatal(format!(
+                "query embedding length {} does not match index dimensions {}",
+                query_vec.len(),
+                store.dimensions
+            )));
+        }
         for (i, row) in sql::vec_arm(conn, &query_vec, &filters, candidates)?
             .into_iter()
             .enumerate()
@@ -135,7 +151,8 @@ pub fn run_search(
         }
     }
     if want_fts {
-        for (i, row) in sql::fts_arm(conn, &keyword, &filters, candidates, None)?
+        for (i, row) in sql::fts_arm(conn, &keyword, &filters, candidates, None)
+            .map_err(fts_err)?
             .into_iter()
             .enumerate()
         {
@@ -150,7 +167,8 @@ pub fn run_search(
             &filters,
             candidates,
             Some("{filename path}"),
-        )?
+        )
+        .map_err(fts_err)?
         .into_iter()
         .enumerate()
         {
@@ -195,6 +213,23 @@ pub fn run_search(
         filters,
         hits,
     })
+}
+
+/// Map FTS5 query-syntax failures (user input) to usage (exit 2);
+/// anything else stays fatal.
+fn fts_err(e: rusqlite::Error) -> Error {
+    let msg = e.to_string();
+    let lower = msg.to_lowercase();
+    if lower.contains("syntax")
+        || lower.contains("fts5")
+        || lower.contains("unterminated")
+        || lower.contains("no such column")
+        || lower.contains("malformed")
+    {
+        Error::usage(format!("invalid keyword query: {msg}"))
+    } else {
+        Error::fatal(msg)
+    }
 }
 
 /// Fetch one hit's row data and build its snippet.
@@ -270,25 +305,22 @@ fn snippet(text: &str, terms: &[String]) -> String {
     if chars.len() <= 200 {
         return text.to_string();
     }
-    let lower: Vec<char> = text.to_lowercase().chars().collect();
-    let mut best: Option<usize> = None;
+    // Case-insensitive window search on byte indices (char-boundary safe),
+    // then mapped back to char indices. Lowercasing can change char counts
+    // (e.g. `İ`), so positions from the lowered string must not index the
+    // original char vector directly.
+    let lower = text.to_lowercase();
+    let mut best_byte: Option<usize> = None;
     for term in terms {
-        let needle: Vec<char> = term.chars().collect();
-        if needle.is_empty() {
+        if term.is_empty() {
             continue;
         }
-        if let Some(pos) = find_subslice(&lower, &needle) {
-            best = Some(best.map_or(pos, |b: usize| b.min(pos)));
+        if let Some(pos) = lower.find(term) {
+            best_byte = Some(best_byte.map_or(pos, |b: usize| b.min(pos)));
         }
     }
-    let start = best.map_or(0, |p| p.saturating_sub(60));
+    let best_char = best_byte.map(|b| text[..b].chars().count()).unwrap_or(0);
+    let start = best_char.saturating_sub(60);
     let end = (start + 200).min(chars.len());
     chars[start..end].iter().collect()
-}
-
-fn find_subslice(hay: &[char], needle: &[char]) -> Option<usize> {
-    if needle.len() > hay.len() {
-        return None;
-    }
-    hay.windows(needle.len()).position(|w| w == needle)
 }

@@ -91,9 +91,11 @@ fn push_metadata(sql: &mut String, params: &mut Vec<Value>, use_files: bool, fil
         if let Some(under) = &filters.under {
             // Canonical prefix; trailing '/' trimmed so `path = u` and
             // `path GLOB u||'/*'` cover the root itself and its contents.
+            // The equality leg binds the raw path; only the GLOB leg is
+            // escaped (escaping `=` would break literal `*?[` paths).
             let u = under.to_string_lossy().trim_end_matches('/').to_string();
             sql.push_str(" AND (f.path = ? OR f.path GLOB ? || '/*')");
-            params.push(Value::Text(glob_escape(&u)));
+            params.push(Value::Text(u.clone()));
             params.push(Value::Text(glob_escape(&u)));
         }
         if let Some(name) = &filters.name {
@@ -113,8 +115,10 @@ pub fn vec_arm(
     candidates: usize,
 ) -> Result<Vec<ArmRow>, rusqlite::Error> {
     let joined = filters.under.is_some() || filters.name.is_some();
+    // Inflated KNN width for path-filtered searches, never below the
+    // requested pool and capped to bound the join cost.
     let k: i64 = if joined {
-        (candidates as i64 * 8).min(400)
+        (candidates as i64).max((candidates as i64 * 8).min(400))
     } else {
         candidates as i64
     };

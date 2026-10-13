@@ -193,6 +193,14 @@ impl Store {
         }
         self.conn.busy_timeout(Duration::from_millis(5000))?;
         self.conn.pragma_update(None, "foreign_keys", "ON")?;
+        let fk: i64 = self
+            .conn
+            .pragma_query_value(None, "foreign_keys", |r| r.get(0))?;
+        if fk != 1 {
+            return Err(Error::fatal(
+                "could not enforce foreign_keys pragma (cascades unreliable)".to_string(),
+            ));
+        }
         Ok(())
     }
 

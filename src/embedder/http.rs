@@ -1,6 +1,6 @@
 //! OpenAI-shaped HTTP text embeddings for `llama_server` / `litert_lm`
-//! (Task 12; spec Appendix B.1). `openai` / `sglang` construct fine but
-//! their `embed` is fatal until Task 16 wires their dialects.
+//! (Task 12; spec Appendix B.1), B.2/B.3 image bodies (Tasks 14–15), and
+//! the `openai` / `sglang` dialects (Task 16; Appendices B.4–B.5).
 
 use std::sync::OnceLock;
 use std::time::Duration;
@@ -21,6 +21,10 @@ const RETRY_DELAYS: [Duration; 3] = [
     Duration::from_millis(400),
     Duration::from_millis(800),
 ];
+
+/// OpenAI's native width: `dimensions` is omitted from request bodies at
+/// exactly this value (Appendix B.5) and sent otherwise.
+pub(crate) const NATIVE_DIMENSIONS: u32 = 768;
 
 pub struct HttpEmbedder {
     backend: Backend,
@@ -112,9 +116,9 @@ impl HttpEmbedder {
         Ok(sized)
     }
 
-    /// `dimensions` is sent only when it differs from 768 (Appendix B.5).
+    /// `dimensions` is sent only when it differs from the native width.
     fn maybe_dimensions(&self) -> Option<u32> {
-        (self.dimensions != 768).then_some(self.dimensions)
+        (self.dimensions != NATIVE_DIMENSIONS).then_some(self.dimensions)
     }
 
     /// openai dialect (Appendix B.5): prefixed strings only, never image
@@ -137,7 +141,7 @@ impl HttpEmbedder {
                 }
             },
         };
-        let mut body = serde_json::json!({
+        let mut body = json!({
             "model": self.cfg.embedder.model,
             "encoding_format": "float",
             "input": text,
@@ -162,18 +166,19 @@ impl HttpEmbedder {
                 } else {
                     format!("<|image|>\n{prefixed}")
                 };
-                serde_json::json!({
+                json!({
                     "text": text,
                     "image": data_uri(image_png),
                 })
             }
             EmbedInput::Image { bytes, .. } => {
-                // Standalone image: both keys, empty text (best-effort —
-                // no live sglang server exists to freeze this further).
-                serde_json::json!({ "text": "", "image": data_uri(bytes) })
+                // Standalone image: the marker locates the image, same
+                // shape the sglang probe uses (no live sglang server
+                // exists to freeze this further).
+                json!(sglang_image_item(bytes))
             }
             _ => match apply_prefix(self.profile, &input) {
-                Some(t) => serde_json::json!({ "text": t }),
+                Some(t) => json!({ "text": t }),
                 None => {
                     return Err(Error::fatal(
                         "internal error: unprefixable input reached sglang embed",
@@ -181,7 +186,7 @@ impl HttpEmbedder {
                 }
             },
         };
-        let mut body = serde_json::json!({
+        let mut body = json!({
             "model": self.cfg.embedder.model,
             "encoding_format": "float",
             "input": [item],
@@ -281,11 +286,11 @@ impl Embedder for HttpEmbedder {
 /// the capability probe: the data-URL part is the whole input, no text
 /// prefix of any kind.
 pub(crate) fn image_body(cfg: &Config, png: &[u8]) -> serde_json::Value {
-    let b64 = base64::engine::general_purpose::STANDARD.encode(png);
+    let url = data_uri(png);
     json!({
         "model": cfg.embedder.model,
         "encoding_format": "float",
-        "input": [{ "content": [{ "type": "image_url", "image_url": { "url": format!("data:image/png;base64,{b64}") } }] }],
+        "input": [{ "content": [{ "type": "image_url", "image_url": { "url": url } }] }],
     })
 }
 
@@ -301,24 +306,13 @@ pub(crate) fn pdf_page_body(
     png: &[u8],
     text: Option<&str>,
 ) -> serde_json::Value {
-    use base64::Engine as _;
-    let b64 = base64::engine::general_purpose::STANDARD.encode(png);
-    let prefixed: String = text
-        .and_then(|t| {
-            apply_prefix(
-                profile,
-                &EmbedInput::Document {
-                    title: None,
-                    text: t.to_string(),
-                },
-            )
-        })
-        .unwrap_or_default();
+    let url = data_uri(png);
+    let prefixed = prefixed_or_empty(profile, text);
     json!({
         "model": cfg.embedder.model,
         "encoding_format": "float",
         "input": [{ "content": [
-            { "type": "image_url", "image_url": { "url": format!("data:image/png;base64,{b64}") } },
+            { "type": "image_url", "image_url": { "url": url } },
             { "type": "text", "text": prefixed },
         ] }],
     })
@@ -326,7 +320,6 @@ pub(crate) fn pdf_page_body(
 
 /// `data:image/png;base64,…` URI for one PNG's bytes.
 fn data_uri(png: &[u8]) -> String {
-    use base64::Engine as _;
     format!(
         "data:image/png;base64,{}",
         base64::engine::general_purpose::STANDARD.encode(png)
@@ -345,6 +338,16 @@ fn prefixed_or_empty(profile: crate::types::PrefixProfile, text: Option<&str>) -
         )
     })
     .unwrap_or_default()
+}
+
+/// Frozen sglang image item (Appendix B.4 family): the `<|image|>` marker
+/// locates the image. Shared by standalone-image embeds and the sglang
+/// capability probe so both speak one shape.
+pub(crate) fn sglang_image_item(png: &[u8]) -> serde_json::Value {
+    json!({
+        "text": "<|image|>",
+        "image": data_uri(png),
+    })
 }
 
 /// True when a response value carries a `data[0].embedding` array.

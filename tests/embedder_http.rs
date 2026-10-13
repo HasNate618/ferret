@@ -436,7 +436,7 @@ fn openai_image_file_never_posts() {
         .unwrap_err();
     assert!(err.is_file_error(), "openai image is per-file: {err}");
     assert_eq!(image_posts.calls(), 0, "no image part may post to openai");
-    let _ = any_posts;
+    assert_eq!(any_posts.calls(), 0, "openai Image must not POST at all");
 }
 
 #[test]
@@ -508,5 +508,128 @@ fn sglang_text_item_sends_dimensions_when_not_768() {
     let cfg = sglang_cfg(&server.base_url(), 4);
     let e = HttpEmbedder::new(&cfg).unwrap();
     let _ = e.embed(doc_input("pets")).unwrap();
+    mock.assert();
+}
+
+#[test]
+fn sglang_textless_pdf_sends_marker_alone() {
+    // Interface bullet: marker alone when textless.
+    let server = httpmock::MockServer::start();
+    let mock = server.mock(|when, then| {
+        when.method("POST").path("/v1/embeddings").json_body(serde_json::json!({
+            "model": "embeddinggemma-2",
+            "encoding_format": "float",
+            "dimensions": 4,
+            "input": [{
+                "text": "<|image|>",
+                "image": "data:image/png;base64,QUJD"
+            }]
+        }));
+        then.status(200).json_body(embedding_json(4));
+    });
+    let cfg = sglang_cfg(&server.base_url(), 4);
+    let e = HttpEmbedder::new(&cfg).unwrap();
+    let v = e
+        .embed(EmbedInput::PdfPage {
+            image_png: b"ABC".to_vec(),
+            text: None,
+        })
+        .unwrap();
+    assert_eq!(v.len(), 4);
+    mock.assert();
+}
+
+#[test]
+fn sglang_omits_dimensions_at_768() {
+    // Counterpart to the openai omission case: no key at native width.
+    let server = httpmock::MockServer::start();
+    let mock = server.mock(|when, then| {
+        when.method("POST").path("/v1/embeddings").json_body(serde_json::json!({
+            "model": "embeddinggemma-2",
+            "encoding_format": "float",
+            "input": [{ "text": "title: none | text: pets" }]
+        }));
+        then.status(200).json_body(embedding_json(768));
+    });
+    let cfg = sglang_cfg(&server.base_url(), 768);
+    let e = HttpEmbedder::new(&cfg).unwrap();
+    let v = e.embed(doc_input("pets")).unwrap();
+    assert_eq!(v.len(), 768);
+    mock.assert();
+}
+
+#[test]
+fn sglang_standalone_image_uses_marker_item() {
+    // Provisional shape (no live server): same marker item as the probe.
+    let server = httpmock::MockServer::start();
+    let mock = server.mock(|when, then| {
+        when.method("POST").path("/v1/embeddings").json_body(serde_json::json!({
+            "model": "embeddinggemma-2",
+            "encoding_format": "float",
+            "dimensions": 4,
+            "input": [{
+                "text": "<|image|>",
+                "image": "data:image/png;base64,QUJD"
+            }]
+        }));
+        then.status(200).json_body(embedding_json(4));
+    });
+    let cfg = sglang_cfg(&server.base_url(), 4);
+    let e = HttpEmbedder::new(&cfg).unwrap();
+    let v = e
+        .embed(EmbedInput::Image {
+            bytes: b"ABC".to_vec(),
+            mime: "image/png".into(),
+        })
+        .unwrap();
+    assert_eq!(v.len(), 4);
+    mock.assert();
+}
+
+#[test]
+fn sglang_probe_posts_b4_shape() {
+    // images_supported with multimodal=None must probe in sglang's own
+    // dialect (B.4 marker item), not the B.2 shape — and report true.
+    let server = httpmock::MockServer::start();
+    let png_b64 = ferret::embedder::probe::PROBE_PNG_BASE64;
+    let mock = server.mock(|when, then| {
+        when.method("POST").path("/v1/embeddings").json_body(serde_json::json!({
+            "model": "embeddinggemma-2",
+            "encoding_format": "float",
+            "input": [{
+                "text": "<|image|>",
+                "image": format!("data:image/png;base64,{png_b64}")
+            }]
+        }));
+        then.status(200).json_body(embedding_json(4));
+    });
+    let cfg = sglang_cfg(&server.base_url(), 4);
+    let e = HttpEmbedder::new(&cfg).unwrap();
+    assert!(e.images_supported());
+    mock.assert();
+}
+
+#[test]
+fn openai_textless_pdf_posts_empty_string() {
+    // Freezes current behavior: text-only Document with empty input
+    // (likely a per-file 400 downstream, never an image part).
+    let server = httpmock::MockServer::start();
+    let mock = server.mock(|when, then| {
+        when.method("POST").path("/v1/embeddings").json_body(serde_json::json!({
+            "model": "embeddinggemma-2",
+            "encoding_format": "float",
+            "dimensions": 4,
+            "input": ""
+        }));
+        then.status(200).json_body(embedding_json(4));
+    });
+    let cfg = openai_cfg(&server.base_url(), 4);
+    let e = HttpEmbedder::new(&cfg).unwrap();
+    let _ = e
+        .embed(EmbedInput::PdfPage {
+            image_png: b"PNG".to_vec(),
+            text: None,
+        })
+        .unwrap();
     mock.assert();
 }

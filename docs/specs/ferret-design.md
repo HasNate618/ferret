@@ -906,17 +906,25 @@ Whether `gemma-embedding2` injects Gemma’s `<|image|>` token from the `image_u
 
 ### B.4 `sglang` — PDF page
 
+(`encoding_format: "float"` is always sent, like B.1/B.5; omitted here
+for brevity. The page text carries the active profile's Document prefix;
+the example below abbreviates it.)
+
 ```json
 {
   "model": "google/embeddinggemma-2",
+  "encoding_format": "float",
   "input": [
     {
-      "text": "<|image|>\npets are not permitted without written consent",
+      "text": "<|image|>\ntitle: none | text: pets are not permitted without written consent",
       "image": "data:image/png;base64,iVBOR..."
     }
   ]
 }
 ```
+
+Textless pages send `"text": "<|image|>"` alone. Standalone images
+send the same marker item. `dimensions` follows the B.5 rule below.
 
 ### B.5 `openai` — text only
 
@@ -924,9 +932,9 @@ Whether `gemma-embedding2` injects Gemma’s `<|image|>` token from the `image_u
 {
   "model": "text-embedding-3-small",
   "input": "task: search result | query: pets in the lease",
-  "encoding_format": "float",
-  "dimensions": 768
+  "encoding_format": "float"
 }
 ```
 
-No image parts. `dimensions` omitted when it equals 768.
+No image parts. `dimensions` is sent only when it differs from 768
+(the example above omits it per this rule).

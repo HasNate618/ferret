@@ -1,8 +1,7 @@
 //! Embedder front end: typed inputs, the `Embedder` trait, L2
 //! normalization / dimension enforcement, and `build_embedder` with the
 //! `FERRET_EMBEDDER=fake` test hook. HTTP backends are served by
-//! [`HttpEmbedder`] (Task 12); `openai` / `sglang` construct but their
-//! `embed` stays fatal until Task 16.
+//! [`HttpEmbedder`] (Tasks 12, 14–16: B.1–B.5 dialects).
 
 pub mod fake;
 pub mod http;

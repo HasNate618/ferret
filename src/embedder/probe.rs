@@ -47,17 +47,27 @@ pub fn ensure_up(client: &Client, cfg: &Config) -> Result<()> {
     }
 }
 
-/// Ask the server to embed a 1x1 PNG (Appendix B.2 body, shared with the
-/// real image path). 200 with a parseable embedding means image support;
-/// HTTP 4xx or a transport failure means text-only. Other 5xx are treated
-/// as "no" too — a 500 on a 67-byte PNG is not a healthy multimodal
-/// server. Task 14 shares this probe.
+/// Ask the server to embed a 1x1 PNG in its own dialect (B.2 for
+/// llama/litert, B.4 marker item for sglang). 200 with a parseable
+/// embedding means image support; HTTP 4xx or a transport failure means
+/// text-only. Other 5xx are treated as "no" too — a 500 on a 67-byte PNG
+/// is not a healthy multimodal server.
 pub fn probe_images(client: &Client, cfg: &Config) -> bool {
     use base64::Engine as _;
     let Ok(png) = base64::engine::general_purpose::STANDARD.decode(PROBE_PNG_BASE64) else {
         return false;
     };
-    let body = super::http::image_body(cfg, &png);
+    // The probe speaks the backend's own image dialect: an sglang-only
+    // server would 4xx the B.2 shape, so sglang probes with a B.4 item.
+    // openai never reaches here (short-circuited by the caller).
+    let body = match cfg.embedder.backend {
+        crate::types::Backend::Sglang => serde_json::json!({
+            "model": cfg.embedder.model,
+            "encoding_format": "float",
+            "input": [super::http::sglang_image_item(&png)],
+        }),
+        _ => super::http::image_body(cfg, &png),
+    };
     let resp = authed(client.post(embeddings_url(cfg)), cfg).json(&body).send();
     match resp {
         Ok(r) if r.status().is_success() => r

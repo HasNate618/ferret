@@ -207,7 +207,7 @@ PDF pages; `images_supported` flips re-embed affected files.
   `~/.cache/ferret/` (all overridable via `XDG_*`).
 - macOS: `~/Library/Preferences/ferret/` for config
   (`dirs` crate); `XDG_*` overrides still win. Default index is
-  `{data_dir}/index.sqlite`.
+  `{data_dir}/ferret/index.sqlite`.
 
 ## Testing without a server
 

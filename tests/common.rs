@@ -10,10 +10,12 @@ pub fn test_dirs(tmp: &std::path::Path) -> FerretDirs {
     }
 }
 
-/// Sets an env var for a test's duration. `#[serial]` makes process-env
-/// mutation safe; the var is removed on drop (even on panic).
-/// root with one markdown file, and an `init`-ed config. Mutates the
-/// process environment — callers must be `#[serial]`.
+/// Scratch dirs under `tmp` for unit-style tests (no env mutation).
+///
+/// Test corpus env: `test_env` builds a temp `XDG_*` tree plus a corpus
+/// root with one markdown file, and an `init`-ed config. It mutates the
+/// process environment without restoring on drop — callers must be
+/// `#[serial]` (unlike `EnvGuard` below, which saves/restores).
 pub struct TestEnv {
     pub tmp: tempfile::TempDir,
     pub root: PathBuf,

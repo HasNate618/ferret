@@ -165,6 +165,20 @@ pub fn open(path: &Path, cfg: &Config, images_supported: bool) -> Result<Store> 
     Ok(store)
 }
 
+/// Open an existing index; unlike `open`, never creates parent dirs or a
+/// new database. Read-only commands (`status`, `search`, `rm`, `gc`)
+/// use this so a typo'd `--index` errors instead of materializing an
+/// empty index as a side effect.
+pub fn open_existing(path: &Path, cfg: &Config, images_supported: bool) -> Result<Store> {
+    if !path.exists() {
+        return Err(Error::fatal(format!(
+            "index {} does not exist; run `ferret index` first (refusing to create it on a read-only command)",
+            path.display()
+        )));
+    }
+    open(path, cfg, images_supported)
+}
+
 impl Store {
     /// Read-only connection handle for tests and read-only CLI output; all
     /// writes go through the methods above.
@@ -384,6 +398,17 @@ impl Store {
             .conn
             .execute("DELETE FROM files WHERE path = ?1", [path])?;
         Ok(deleted > 0)
+    }
+
+    /// Mark complete inside an open transaction (folds the final flag flip
+    /// into the write tx so a crash cannot leave fully-written rows at
+    /// `complete=0`).
+    pub fn mark_complete_in_tx(&self, tx: &Transaction<'_>, file_id: i64) -> Result<()> {
+        tx.execute(
+            "UPDATE files SET complete = 1, error = NULL WHERE id = ?1",
+            [file_id],
+        )?;
+        Ok(())
     }
 
     /// Page numbers present in `chunks` for a file, ascending. Drives the

@@ -916,7 +916,12 @@ fn refresh_pdf_texts(store: &Store, cfg: &Config, err: &mut dyn std::io::Write) 
                 continue;
             };
             let trimmed = text.trim();
-            if store.update_chunk_text(file_id, page, trimmed).is_err() {
+            if let Err(e) = store.update_chunk_text(file_id, page, trimmed) {
+                let _ = writeln!(
+                    err,
+                    "warning: PDF text refresh failed for {} page {page} (keeping stale text: {e})",
+                    Path::new(&path).display(),
+                );
                 break;
             }
         }
@@ -992,9 +997,9 @@ fn index_file(
                 kind,
                 &ext,
                 config_fp,
-                Error::fatal(e.to_string()),
+                Error::file(e.to_string()),
                 summary,
-            );
+            )?;
             return Ok(());
         }
     };
@@ -1042,8 +1047,8 @@ fn index_file(
         }
     }
 
-    // Re-extract replaces any previous rows for this path.
-    store.delete_file_by_path(&path_str)?;
+    // No DB mutation before extract/embed succeed: the write tx below
+    // deletes + replaces atomically, so a fatal abort keeps prior rows.
 
     // --- extract phase (per-file errors recorded, walk continues) --------
     let chunks: Vec<Chunk> = match kind {
@@ -1059,9 +1064,9 @@ fn index_file(
                         kind,
                         &ext,
                         config_fp,
-                        Error::fatal(e.to_string()),
+                        Error::file(e.to_string()),
                         summary,
-                    );
+                    )?;
                     return Ok(());
                 }
             };
@@ -1078,7 +1083,7 @@ fn index_file(
                         config_fp,
                         e,
                         summary,
-                    );
+                    )?;
                     return Ok(());
                 }
             }
@@ -1098,7 +1103,7 @@ fn index_file(
                         config_fp,
                         e,
                         summary,
-                    );
+                    )?;
                     return Ok(());
                 }
             }
@@ -1161,7 +1166,7 @@ fn index_file(
                 config_fp,
                 e,
                 summary,
-            );
+            )?;
             return Ok(());
         }
         Err(e) => return Err(e),
@@ -1169,7 +1174,10 @@ fn index_file(
 
     // --- write phase: one transaction ------------------------------------
     // The collection is vec metadata, so it is kept out of `NewFile`'s move.
+    // Prior rows are dropped here (after extract/embed succeed), so a fatal
+    // abort during extract/embed keeps the previous index rows.
     let collection_for_vec = collection.clone();
+    store.delete_file_by_path(&path_str)?;
     let tx = store.begin()?;
     let file_id = store.upsert_file(&NewFile {
         path: path_str.clone(),
@@ -1206,8 +1214,8 @@ fn index_file(
             store.insert_vec(&tx, chunk_id, &v, kind, &ext, mtime, &collection_for_vec)?;
         }
     }
+    store.mark_complete_in_tx(&tx, file_id)?;
     tx.commit()?;
-    store.mark_complete(file_id)?;
 
     summary.embedded += 1;
     emit_ok(sink.json, &path, &mut *sink.out)?;
@@ -1227,7 +1235,7 @@ fn record_extract_error(
     config_fp: &str,
     err: Error,
     summary: &mut IndexSummary,
-) {
+) -> Result<()> {
     summary.errors += 1;
     let message = err.to_string();
     let path_str = path.to_string_lossy().into_owned();
@@ -1256,6 +1264,9 @@ fn record_extract_error(
             })
         );
     }
+    // Replace prior rows with the error row; a DB failure here is fatal
+    // (the walk cannot record the outcome), unlike the extract failure.
+    store.delete_file_by_path(&path_str)?;
     let row = NewFile {
         path: path_str.clone(),
         collection: collection.to_string(),
@@ -1270,7 +1281,8 @@ fn record_extract_error(
         indexed_at: now_unix(),
         error: Some(message),
     };
-    let _ = store.upsert_file(&row);
+    store.upsert_file(&row)?;
+    Ok(())
 }
 
 /// Persist a capability-skip row (complete, reason recorded, zero chunks,

@@ -112,24 +112,53 @@ pub fn walk(
     };
 
     for root in roots {
-        w.walk_dir(&root.path, &root.path, &root.collection, Vec::new(), false)?;
+        w.walk_dir(
+            &root.path,
+            &root.path,
+            &root.collection,
+            Vec::new(),
+            false,
+            &mut std::collections::HashSet::new(),
+        )?;
     }
     for path in extra {
         // An extra file/dir under a configured root inherits that root's
         // collection; otherwise it is its own collection (last component).
-        let collection = roots
-            .iter()
-            .find(|r| path.starts_with(&r.path))
-            .map(|r| r.collection.clone())
-            .unwrap_or_else(|| {
-                path.file_name()
-                    .map(|n| n.to_string_lossy().into_owned())
-                    .unwrap_or_default()
-            });
+        let under_root = roots.iter().find(|r| path.starts_with(&r.path));
+        let collection = under_root.map(|r| r.collection.clone()).unwrap_or_else(|| {
+            path.file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default()
+        });
+        // Extra paths get the same symlink gate as walked entries: with
+        // follow_symlinks=false a symlink is a skip, never indexed.
+        if path.is_symlink() && !follow_symlinks {
+            w.skip(path, SkipReason::SkipRule);
+            continue;
+        }
         if path.is_dir() {
-            w.walk_dir(path, path, &collection, Vec::new(), false)?;
+            w.walk_dir(
+                path,
+                path,
+                &collection,
+                Vec::new(),
+                false,
+                &mut std::collections::HashSet::new(),
+            )?;
         } else {
-            w.emit_file(path, path, &collection)?;
+            // Gitignore applies to extra files too: build the matcher
+            // stack from the containing root (or the file's own ancestor
+            // chain) so CLI-passed ignored paths cannot bypass the gate.
+            let (root, base_ignores, base_repo) = match under_root {
+                Some(r) => (r.path.clone(), Vec::new(), r.path.join(".git").exists()),
+                None => (
+                    path.parent().map(|p| p.to_path_buf()).unwrap_or_default(),
+                    Vec::new(),
+                    false,
+                ),
+            };
+            let ignores = ignores_for_file(&root, path, base_ignores, base_repo, files_cfg);
+            w.emit_file(path, path, &collection, &ignores)?;
         }
     }
     Ok(w.events)
@@ -164,7 +193,8 @@ struct Walker<'a> {
 impl Walker<'_> {
     /// Walk one directory. `ignores` is the stack of gitignore matchers
     /// from ancestors (innermost last); `in_repo` says a `.git` exists at
-    /// or above this directory.
+    /// or above this directory. `visited` holds (dev, ino) of followed
+    /// directories to break symlink cycles (follow_symlinks only).
     fn walk_dir(
         &mut self,
         dir: &Path,
@@ -172,7 +202,15 @@ impl Walker<'_> {
         collection: &str,
         parent_ignores: Vec<Gitignore>,
         parent_in_repo: bool,
+        visited: &mut std::collections::HashSet<(u64, u64)>,
     ) -> Result<()> {
+        // Cycle guard: a followed symlink loop (a↔b) would otherwise
+        // recurse unboundedly. Non-followed symlinks never reach here
+        // (skipped by the caller).
+        if self.follow_symlinks && !visited.insert(dir_id(dir)) {
+            self.skip(dir, SkipReason::SkipRule);
+            return Ok(());
+        }
         let mut ignores = parent_ignores;
         let in_repo = parent_in_repo || dir.join(".git").exists();
         if self.files_cfg.respect_gitignore && in_repo {
@@ -212,23 +250,32 @@ impl Walker<'_> {
                 self.skip(&path, SkipReason::SkipRule);
                 continue;
             }
-            if self.ignored(&ignores, &path, is_dir) {
+            // Gitignore prunes directories here (to skip whole trees);
+            // files are checked in `emit_file` AFTER include_globs, per
+            // the documented order skip-rule → include → gitignore.
+            if is_dir && self.ignored(&ignores, &path, true) {
                 self.skip(&path, SkipReason::Gitignore);
                 continue;
             }
 
             if is_dir {
-                self.walk_dir(&path, root, collection, ignores.clone(), in_repo)?;
+                self.walk_dir(&path, root, collection, ignores.clone(), in_repo, visited)?;
                 continue;
             }
-            self.emit_file(&path, root, collection)?;
+            self.emit_file(&path, root, collection, &ignores)?;
         }
         Ok(())
     }
 
     /// Extension typing, heic gate, then the file skip-rule list,
     /// include_globs, and gitignore, in the spec's order.
-    fn emit_file(&mut self, path: &Path, root: &Path, collection: &str) -> Result<()> {
+    fn emit_file(
+        &mut self,
+        path: &Path,
+        root: &Path,
+        collection: &str,
+        ignores: &[Gitignore],
+    ) -> Result<()> {
         // 0. HEIC/HEIF gate first (spec §4.3): `skip` (default) is a
         // HeicSkip. `magick` types unmapped files as images below even
         // though the default extension map omits heic/heif — otherwise
@@ -290,9 +337,12 @@ impl Walker<'_> {
             }
         }
 
-        // 4. gitignore is checked in walk_dir for directories; for files it
-        // was already checked before the ext-typing short-circuit above, so
-        // nothing remains.
+        // 4. gitignore, after include_globs (spec order). Directory
+        // pruning already happened in `walk_dir`; this is the file gate.
+        if self.files_cfg.respect_gitignore && self.ignored(ignores, path, false) {
+            self.skip(path, SkipReason::Gitignore);
+            return Ok(());
+        }
 
         self.events.push(WalkEvent::File {
             path: path.to_path_buf(),
@@ -354,4 +404,67 @@ fn load_gitignore(dir: &Path) -> Option<Gitignore> {
     let mut builder = GitignoreBuilder::new(dir);
     builder.add(file);
     builder.build().ok()
+}
+
+/// (dev, ino) identity for cycle detection. Non-unix: hash fallback that
+/// never collides across distinct paths in practice (cycle guard best
+/// effort off unix).
+fn dir_id(dir: &Path) -> (u64, u64) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        if let Ok(md) = std::fs::metadata(dir) {
+            return (md.dev(), md.ino());
+        }
+    }
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    let mut h = DefaultHasher::new();
+    dir.hash(&mut h);
+    (0, h.finish())
+}
+
+/// Build the gitignore matcher stack for an extra file: from `root` down
+/// through each ancestor dir to the file's parent (mirrors the `walk_dir`
+/// accumulation, so CLI-passed files cannot bypass gitignore).
+fn ignores_for_file(
+    root: &Path,
+    file: &Path,
+    mut ignores: Vec<Gitignore>,
+    mut in_repo: bool,
+    files_cfg: &FilesConfig,
+) -> Vec<Gitignore> {
+    if !files_cfg.respect_gitignore {
+        return ignores;
+    }
+    let parent = match file.parent() {
+        Some(p) => p,
+        None => return ignores,
+    };
+    // Chain from root to parent (inclusive), loading each `.gitignore`
+    // once a `.git` has been seen at or above.
+    let mut chain: Vec<PathBuf> = Vec::new();
+    let mut cur = parent;
+    loop {
+        chain.push(cur.to_path_buf());
+        if cur == root || !cur.starts_with(root) {
+            break;
+        }
+        match cur.parent() {
+            Some(p) if p != cur => cur = p,
+            _ => break,
+        }
+    }
+    chain.reverse();
+    for dir in chain {
+        if dir.join(".git").exists() {
+            in_repo = true;
+        }
+        if in_repo {
+            if let Some(gi) = load_gitignore(&dir) {
+                ignores.push(gi);
+            }
+        }
+    }
+    ignores
 }

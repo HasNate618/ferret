@@ -231,7 +231,7 @@ fn execute(
         }
         Command::Status { json } => {
             let cfg = config::load(&opts)?;
-            let store = store::open(&cfg.index.path, &cfg, true)?;
+            let store = store::open_existing(&cfg.index.path, &cfg, true)?;
             let c = store.status_counts()?;
             // `status` never calls the embedder: the last `index` run
             // recorded its probe result in meta; without one, only openai
@@ -288,12 +288,14 @@ fn execute(
         } => {
             let mut query = query;
             // No QUERY and stdin is not a TTY: read one line. Never prompt.
+            // Whitespace-only input counts as empty (falls through to the
+            // filter/usage check below).
             if query.is_none() && !is_tty {
                 let mut line = String::new();
                 stdin
                     .read_line(&mut line)
                     .map_err(|e| Error::fatal(e.to_string()))?;
-                let line = line.trim_end_matches(['\n', '\r']);
+                let line = line.trim();
                 if !line.is_empty() {
                     query = Some(line.to_string());
                 }
@@ -332,6 +334,7 @@ fn execute(
                     json,
                 },
                 stdout,
+                stderr,
             )?;
             Ok(())
         }
@@ -362,8 +365,11 @@ fn run_search_cli(
     query: Option<&str>,
     args: SearchArgs,
     stdout: &mut dyn Write,
+    stderr: &mut dyn Write,
 ) -> Result<()> {
     let cfg = config::load(opts)?;
+    // The query itself leaves the machine on remote backends.
+    upload_warning(&cfg, stderr);
     let flags = FilterFlags {
         kind: split_kinds(&args.kind)?,
         ext: split_strings(&args.ext),
@@ -376,7 +382,7 @@ fn run_search_cli(
     };
     let parsed = search::parse_query(query.unwrap_or(""), &flags)?;
     let embedder = embedder::build_embedder(&cfg, &|k| std::env::var(k).ok())?;
-    let store = store::open(&cfg.index.path, &cfg, embedder.images_supported())?;
+    let store = store::open_existing(&cfg.index.path, &cfg, embedder.images_supported())?;
     let req = SearchRequest {
         parsed,
         mode: args.mode.unwrap_or(cfg.search.mode),
@@ -517,7 +523,7 @@ fn upload_warning(cfg: &Config, stderr: &mut dyn Write) {
 fn cmd_rm(opts: &LoadOpts, paths: &[PathBuf], stderr: &mut dyn Write) -> Result<()> {
     let cfg = config::load(opts)?;
     upload_warning(&cfg, stderr);
-    let store = store::open(&cfg.index.path, &cfg, true)?;
+    let store = store::open_existing(&cfg.index.path, &cfg, true)?;
     for raw in paths {
         let expanded = expand_tilde(raw);
         // The walk stores paths as-given, so try the canonical spelling
@@ -545,7 +551,7 @@ fn cmd_rm(opts: &LoadOpts, paths: &[PathBuf], stderr: &mut dyn Write) -> Result<
 /// follow via `delete_file_by_path` + CASCADE). Never touches meta.
 fn cmd_gc(opts: &LoadOpts, stderr: &mut dyn Write) -> Result<()> {
     let cfg = config::load(opts)?;
-    let store = store::open(&cfg.index.path, &cfg, true)?;
+    let store = store::open_existing(&cfg.index.path, &cfg, true)?;
     let paths: Vec<String> = {
         let mut stmt = store.conn().prepare("SELECT path FROM files")?;
         stmt.query_map([], |r| r.get(0))?
@@ -578,26 +584,24 @@ fn config_show(opts: &LoadOpts, stdout: &mut dyn Write) -> Result<()> {
     Ok(())
 }
 
-/// `ferret config path`: loaded file paths one per line, then `defaults` /
-/// `env` / `flags` if those layers contributed.
+/// `ferret config path`: one line per contributing layer, in merge order
+/// (file paths plus `defaults` / `env` / `flags` markers interleaved as
+/// they merged).
 fn config_path(opts: &LoadOpts, stdout: &mut dyn Write) -> Result<()> {
     let (_cfg, layers) = load_with_layers(opts)?;
     for layer in &layers {
-        let path = match layer {
-            LayerSource::Etc => Some(Path::new(crate::config::SYSTEM_CONFIG_PATH)),
-            LayerSource::UserFile(p) | LayerSource::CwdFile(p) => Some(p.as_path()),
-            LayerSource::Defaults | LayerSource::Env | LayerSource::Flags => None,
-        };
-        if let Some(path) = path {
-            writeln!(stdout, "{}", path.display())?;
-        }
-    }
-    for layer in &layers {
         match layer {
+            LayerSource::Etc => writeln!(
+                stdout,
+                "{}",
+                Path::new(crate::config::SYSTEM_CONFIG_PATH).display()
+            )?,
+            LayerSource::UserFile(p) | LayerSource::CwdFile(p) => {
+                writeln!(stdout, "{}", p.display())?
+            }
             LayerSource::Defaults => writeln!(stdout, "defaults")?,
             LayerSource::Env => writeln!(stdout, "env")?,
             LayerSource::Flags => writeln!(stdout, "flags")?,
-            LayerSource::Etc | LayerSource::UserFile(_) | LayerSource::CwdFile(_) => {}
         }
     }
     Ok(())
@@ -609,6 +613,7 @@ fn load_with_layers(opts: &LoadOpts) -> Result<(crate::config::Config, Vec<Layer
     let dirs = ferret_dirs(&|k| std::env::var(k).ok());
     let cwd = std::env::current_dir()?;
     config::load_from(opts, &dirs, &|k| std::env::var(k).ok(), &cwd, &|p| {
-        std::fs::read_to_string(p).map_err(|e| Error::fatal(e.to_string()))
+        std::fs::read_to_string(p)
+            .map_err(|e| Error::fatal(format!("config `{}`: {e}", p.display())))
     })
 }

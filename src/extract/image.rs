@@ -90,7 +90,7 @@ pub fn extract_image(
     };
     let mut png = Vec::new();
     img.write_to(&mut Cursor::new(&mut png), image::ImageFormat::Png)
-        .map_err(|e| Error::fatal(format!("cannot PNG-encode {}: {e}", path.display())))?;
+        .map_err(|e| Error::file(format!("cannot PNG-encode {}: {e}", path.display())))?;
 
     Ok(vec![Chunk {
         kind: ChunkKind::Image,
@@ -113,7 +113,7 @@ pub fn extract_image(
 /// flag (`-define`, `--version`) cannot inject converter options.
 fn convert_heic(path: &Path, cache_dir: &Path) -> Result<PathBuf> {
     let converter = find_magick()
-        .ok_or_else(|| Error::fatal("heic conversion needs magick or convert on PATH"))?;
+        .ok_or_else(|| Error::file("heic conversion needs magick or convert on PATH"))?;
     let out_dir = cache_dir.join("heic");
     std::fs::create_dir_all(&out_dir)?;
     let stem = path
@@ -130,16 +130,16 @@ fn convert_heic(path: &Path, cache_dir: &Path) -> Result<PathBuf> {
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .status()
-        .map_err(|e| Error::fatal(format!("could not run {}: {e}", converter.display())))?;
+        .map_err(|e| Error::file(format!("could not run {}: {e}", converter.display())))?;
     if !status.success() {
-        return Err(Error::fatal(format!(
+        return Err(Error::file(format!(
             "heic conversion failed for {} ({} exited {status})",
             path.display(),
             converter.display(),
         )));
     }
     if !out.is_file() {
-        return Err(Error::fatal(format!(
+        return Err(Error::file(format!(
             "heic conversion reported success but wrote nothing for {}",
             path.display()
         )));

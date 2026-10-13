@@ -144,7 +144,8 @@ pub fn load(opts: &LoadOpts) -> Result<Config> {
     let dirs = ferret_dirs(&|k| std::env::var(k).ok());
     let cwd = std::env::current_dir()?;
     let (cfg, _) = load_from(opts, &dirs, &|k| std::env::var(k).ok(), &cwd, &|p| {
-        std::fs::read_to_string(p).map_err(|e| Error::fatal(e.to_string()))
+        std::fs::read_to_string(p)
+            .map_err(|e| Error::fatal(format!("config `{}`: {e}", p.display())))
     })?;
     Ok(cfg)
 }
@@ -1080,8 +1081,14 @@ fn build_roots(spec: RootSpec) -> Result<Vec<RootEntry>> {
 pub(crate) fn expand_tilde(p: &str) -> PathBuf {
     let home = dirs::home_dir().unwrap_or_default();
     if p == "~" {
+        if home.as_os_str().is_empty() {
+            return PathBuf::from(p);
+        }
         home
     } else if let Some(rest) = p.strip_prefix("~/") {
+        if home.as_os_str().is_empty() {
+            return PathBuf::from(p);
+        }
         home.join(rest)
     } else {
         PathBuf::from(p)

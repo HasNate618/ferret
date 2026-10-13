@@ -163,14 +163,15 @@ fn config_path_lists_user_file_then_layers() {
     let out = try_run(&["ferret", "config", "path"]).unwrap();
     let user_file = tmp.path().join("ferret/config.toml");
     assert!(out.stdout.contains(user_file.to_str().unwrap()));
-    let defaults_line = out
+    // Layers print in merge order: compiled defaults first.
+    let first_line = out
         .stdout
         .lines()
-        .last()
+        .next()
         .unwrap_or_default()
         .trim()
         .to_string();
-    assert_eq!(defaults_line, "defaults");
+    assert_eq!(first_line, "defaults");
 }
 
 #[test]
@@ -183,7 +184,11 @@ fn rm_and_gc_stubs_exit_zero() {
         std::env::set_var("XDG_CONFIG_HOME", tmp.path().join("cfg"));
         std::env::set_var("XDG_DATA_HOME", tmp.path().join("data"));
         std::env::set_var("XDG_CACHE_HOME", tmp.path().join("cache"));
+        std::env::set_var("FERRET_EMBEDDER", "fake");
     }
+    try_run(&["ferret", "init"]).unwrap();
+    // Read-only commands refuse to materialize an index: create it first.
+    try_run(&["ferret", "index"]).unwrap();
     try_run(&["ferret", "rm", "/nonexistent/path"]).unwrap();
     try_run(&["ferret", "gc"]).unwrap();
 }

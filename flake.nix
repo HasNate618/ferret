@@ -17,9 +17,11 @@
             src = pkgs.lib.cleanSource ./.;
             cargoLock.lockFile = ./Cargo.lock;
             nativeBuildInputs = [ pkgs.pkg-config pkgs.makeWrapper ];
-            # reqwest loads the native CA bundle at Client::build() time
-            # (the test suite builds clients against httpmock). The build
-            # sandbox ships no system bundle, so point at nixpkgs' one.
+            # The build sandbox ships no system CA bundle; keep one visible
+            # for any native-TLS client use and for the httpmock-based tests.
+            # (The default reqwest `rustls` backend uses bundled webpki roots
+            # and ignores SSL_CERT_FILE; this only matters if a native-TLS
+            # feature is ever enabled.)
             SSL_CERT_FILE = "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt";
             # poppler-utils on PATH: pdfinfo/pdftotext/pdftoppm for PDFs.
             # No ImageMagick here (see nixosModules.ferret heicMagick).

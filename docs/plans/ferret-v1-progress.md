@@ -60,3 +60,4 @@ Status: `pending` | `active` | `done` | `blocked` | `parked`.
 - v1.1 Task 1 (plan event): done. WalkEvent::File now carries walk-time size (reviewer P2 fix); plan line first on index --json; unknown-event-tolerance rule in spec + README. SPEC Approved, QUALITY Approved.
 - v1.1 Task 2 (summary event): done. Last stdout line mirrors stderr counters; strict-failure omits both (specced). SPEC Approved, QUALITY Approved + 3 P2 fixes applied.
 - v1.1 Task 3 (roots in status): done. roots[] in config order + [] empty case, existing keys untouched. SPEC Approved, QUALITY Approved + 3 P2 fixes applied.
+- v1.1 Task 4 (warnings): done. warnings[] always present; vec_starved + browse_no_vec per rule letter (keyword-mode triggers both when scoped). SPEC Approved, QUALITY Approved + 3 P2 fixes applied (hybrid-starvation positive case unreachable with fake embedder — proven by probe, negative-side test added instead).

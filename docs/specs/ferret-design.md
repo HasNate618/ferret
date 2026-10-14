@@ -323,7 +323,7 @@ Require **SQLite ≥ 3.38** (rusqlite `bundled` feature). Multi-value `--kind` /
 
 `files.fingerprint = blake3(canonical_path || 0x1f || mtime ascii || 0x1f || size ascii || 0x1f || config_fingerprint)` as hex.
 
-`config_fingerprint = blake3(canonical JSON in Appendix A)` as hex. That JSON includes `text_pipeline`, `image_pipeline`, and `audio_pipeline` objects (not a single blob of every knob). Adding `audio_pipeline` changes the fingerprint for existing indexes, so the next `ferret index` re-embeds audio files under the new segmentation (same fingerprint-gated mechanism as text/image pipeline bumps).
+`config_fingerprint = blake3(canonical JSON in Appendix A)` as hex. That JSON includes `text_pipeline`, `image_pipeline`, `audio_pipeline`, and `video_pipeline` objects (not a single blob of every knob). Adding `audio_pipeline` changes the fingerprint for existing indexes, so the next `ferret index` re-embeds audio files under the new segmentation (same fingerprint-gated mechanism as text/image pipeline bumps; likewise `video_pipeline` for video files).
 
 Reindex granularity (Semantra: changing text chunk size must not re-embed PNGs):
 

@@ -1139,7 +1139,7 @@ fn index_file(
     }
 
     // Skip fast-path: unchanged fingerprint, complete, and no recorded
-    // skip. no_image_backend rows always re-process: the probe result may
+    // skip. Any skip_reason rows always re-process: the probe result may
     // have flipped without moving the fingerprint.
     if let Some(row) = store.get_file_by_path(&path_str)? {
         if row.fingerprint == file_fp && row.complete && row.skip_reason.is_none() {
@@ -1243,8 +1243,7 @@ fn index_file(
                 }
             }
         }
-        // Video milestone Task 1: the arm must exist for exhaustiveness.
-        // Task 5 replaces this stub with extract_video dispatch.
+        // Video: segment into mp4 clips via extract_video.
         FileKind::Video => {
             let ffmpeg_dir = walk::ffmpeg_dir_opt(&cfg.extract);
             match extract::video::extract_video(

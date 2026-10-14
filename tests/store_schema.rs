@@ -40,6 +40,7 @@ fn file(path: &str, kind: FileKind) -> NewFile {
         FileKind::Image => "png",
         FileKind::Pdf => "pdf",
         FileKind::Audio => "wav",
+        FileKind::Video => "mp4",
     };
     NewFile {
         path: path.into(),

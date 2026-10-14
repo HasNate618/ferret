@@ -1217,6 +1217,22 @@ fn index_file(
                 }
             }
         }
+        // Video milestone Task 1: the arm must exist for exhaustiveness.
+        // Task 5 replaces this stub with extract_video dispatch.
+        FileKind::Video => {
+            record_extract_error(
+                store,
+                &mut sink,
+                &path,
+                &collection,
+                kind,
+                &ext,
+                config_fp,
+                Error::file("video indexing not wired yet (video milestone Task 5)"),
+                summary,
+            )?;
+            return Ok(());
+        }
     };
 
     // --- embed phase (embedder failures are FATAL, not per-file) ---------

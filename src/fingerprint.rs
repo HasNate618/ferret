@@ -48,6 +48,12 @@ pub fn audio_pipeline_json(cfg: &Config) -> String {
     to_canonical_json(audio_pipeline_value(cfg))
 }
 
+/// The video half of the fingerprint, standalone for store meta: everything
+/// that changes video segmentation.
+pub fn video_pipeline_json(cfg: &Config) -> String {
+    to_canonical_json(video_pipeline_value(cfg))
+}
+
 /// `blake3(canonical_path || 0x1f || mtime || 0x1f || size || 0x1f ||
 /// config_fingerprint)` as hex; separators make the concatenation unambiguous.
 pub fn file_fingerprint(
@@ -101,6 +107,7 @@ fn config_fingerprint_value(cfg: &Config, images_supported: bool) -> Value {
             Value::String(PREFIX_VERSION.to_string()),
         ),
         ("text_pipeline".into(), text_pipeline_value(cfg)),
+        ("video_pipeline".into(), video_pipeline_value(cfg)),
     ])
 }
 
@@ -110,6 +117,15 @@ fn audio_pipeline_value(cfg: &Config) -> Value {
     object(vec![(
         "segment_secs".into(),
         Value::from(cfg.chunk.audio.segment_secs as i64),
+    )])
+}
+
+/// Video pipeline: segment length only. Changing it re-segments and
+/// re-embeds video files, nothing else.
+fn video_pipeline_value(cfg: &Config) -> Value {
+    object(vec![(
+        "segment_secs".into(),
+        Value::from(cfg.chunk.video.segment_secs as i64),
     )])
 }
 

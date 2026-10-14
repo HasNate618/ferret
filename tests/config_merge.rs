@@ -450,3 +450,48 @@ fn env_overrides_audio_and_ffmpeg_dir() {
     assert_eq!(c.chunk.audio.segment_secs, 45);
     assert_eq!(c.extract.ffmpeg_dir, "/opt/ffmpeg");
 }
+
+#[test]
+fn video_kinds_parse_and_display() {
+    use ferret::types::{ChunkKind, FileKind};
+    assert_eq!("video".parse::<FileKind>().unwrap(), FileKind::Video);
+    assert_eq!(ChunkKind::VideoSegment.to_string(), "video_segment");
+}
+
+#[test]
+fn compiled_defaults_include_video() {
+    let c = compiled_defaults(&dirs());
+    for ext in ["mp4", "mkv", "webm", "mov", "avi", "m4v"] {
+        assert_eq!(
+            c.files.extension_kind.get(ext),
+            Some(&ferret::types::FileKind::Video)
+        );
+    }
+    assert_eq!(c.chunk.video.segment_secs, 10);
+}
+
+#[test]
+fn zero_video_segment_secs_is_fatal() {
+    use std::collections::HashMap;
+    let files: HashMap<PathBuf, String> = HashMap::from([(
+        PathBuf::from("/tmp/ferret-cfg/config.toml"),
+        "[chunk.video]\nsegment_secs = 0\n".into(),
+    )]);
+    let err = load_from(
+        &LoadOpts {
+            config_flag: None,
+            index_flag: None,
+        },
+        &dirs(),
+        &|_| None,
+        Path::new("/tmp/cwd"),
+        &|p| {
+            files
+                .get(p)
+                .cloned()
+                .ok_or_else(|| ferret::error::Error::fatal("missing"))
+        },
+    )
+    .unwrap_err();
+    assert!(err.to_string().contains("segment_secs"));
+}

@@ -95,6 +95,7 @@ pub struct ChunkConfig {
     pub pdf: PdfChunkConfig,
     pub image: ImageChunkConfig,
     pub audio: AudioChunkConfig,
+    pub video: VideoChunkConfig,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -124,6 +125,14 @@ pub struct ImageChunkConfig {
 pub struct AudioChunkConfig {
     /// Clip length in seconds; each segment embeds as one vector (~25
     /// tokens/sec of audio, so 30s ≈ 750 tokens).
+    pub segment_secs: u64,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct VideoChunkConfig {
+    /// Clip length in seconds; each segment embeds as one vector (~140
+    /// tokens/frame at the server frame rate, so 10s at 4fps ≈ 40 frames,
+    /// inside the ~58-frame per-input budget).
     pub segment_secs: u64,
 }
 
@@ -266,6 +275,7 @@ pub fn compiled_defaults(dirs: &FerretDirs) -> Config {
             },
             image: ImageChunkConfig { max_edge_px: 1024 },
             audio: AudioChunkConfig { segment_secs: 30 },
+            video: VideoChunkConfig { segment_secs: 10 },
         },
         extract: ExtractConfig {
             poppler_dir: String::new(),
@@ -325,6 +335,11 @@ fn default_extension_kind() -> BTreeMap<String, FileKind> {
         &mut map,
         FileKind::Audio,
         &["mp3", "wav", "flac", "ogg", "opus", "m4a", "aac"],
+    );
+    put(
+        &mut map,
+        FileKind::Video,
+        &["mp4", "mkv", "webm", "mov", "avi", "m4v"],
     );
     map
 }
@@ -459,11 +474,17 @@ pub fn to_display_toml(cfg: &Config) -> String {
         "segment_secs".into(),
         Value::from(cfg.chunk.audio.segment_secs as i64),
     );
+    let mut video = Table::new();
+    video.insert(
+        "segment_secs".into(),
+        Value::from(cfg.chunk.video.segment_secs as i64),
+    );
     let mut chunk = Table::new();
     chunk.insert("text".into(), Value::Table(text));
     chunk.insert("pdf".into(), Value::Table(pdf));
     chunk.insert("image".into(), Value::Table(image));
     chunk.insert("audio".into(), Value::Table(audio));
+    chunk.insert("video".into(), Value::Table(video));
     root.insert("chunk".into(), Value::Table(chunk));
 
     let mut extract = Table::new();
@@ -644,6 +665,7 @@ const ENV_PATHS: &[&str] = &[
     "chunk.pdf.embed_page_image",
     "chunk.image.max_edge_px",
     "chunk.audio.segment_secs",
+    "chunk.video.segment_secs",
     "extract.poppler_dir",
     "extract.pdfinfo",
     "extract.pdftotext",
@@ -698,6 +720,7 @@ fn coerce_env_value(path: &str, raw: &str) -> Result<Value> {
         | "chunk.pdf.render_dpi"
         | "chunk.image.max_edge_px" => Value::from(i64::from(parse_env::<u32>(path, raw)?)),
         "chunk.audio.segment_secs" => Value::from(parse_env::<u64>(path, raw)? as i64),
+        "chunk.video.segment_secs" => Value::from(parse_env::<u64>(path, raw)? as i64),
         "embedder.timeout_ms" => Value::from(parse_env::<u64>(path, raw)? as i64),
         "search.default_limit"
         | "search.candidates"
@@ -818,6 +841,7 @@ struct RawChunk {
     pdf: RawPdfChunk,
     image: RawImageChunk,
     audio: RawAudioChunk,
+    video: RawVideoChunk,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -849,6 +873,12 @@ struct RawImageChunk {
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
 struct RawAudioChunk {
+    segment_secs: Option<u64>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+struct RawVideoChunk {
     segment_secs: Option<u64>,
 }
 
@@ -1039,6 +1069,9 @@ fn build_config(raw: RawConfig, dirs: &FerretDirs) -> Result<Config> {
     if let Some(v) = raw.chunk.audio.segment_secs {
         cfg.chunk.audio.segment_secs = v;
     }
+    if let Some(v) = raw.chunk.video.segment_secs {
+        cfg.chunk.video.segment_secs = v;
+    }
 
     let x = raw.extract;
     if let Some(v) = x.poppler_dir {
@@ -1155,6 +1188,11 @@ fn validate(cfg: &Config) -> Result<()> {
     if cfg.chunk.audio.segment_secs == 0 {
         return Err(Error::fatal(
             "config: chunk.audio.segment_secs must be at least 1".to_string(),
+        ));
+    }
+    if cfg.chunk.video.segment_secs == 0 {
+        return Err(Error::fatal(
+            "config: chunk.video.segment_secs must be at least 1".to_string(),
         ));
     }
     if !matches!(cfg.embedder.dimensions, 768 | 512 | 256 | 128) {

@@ -127,7 +127,7 @@ fn walk_skip_deletes_existing_row() {
 #[serial_test::serial]
 fn index_json_ndjson_events() {
     let env = common::test_env();
-    std::fs::write(env.root.join("clip.mp4"), "x").unwrap();
+    std::fs::write(env.root.join("clip.xyz"), "x").unwrap();
     let out = try_run(&["ferret", "index", "--json"]).unwrap();
     let lines: Vec<&str> = out
         .stdout

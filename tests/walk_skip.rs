@@ -173,14 +173,14 @@ fn unsupported_ext_is_walk_skip() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path().join("c");
     std::fs::create_dir_all(&root).unwrap();
-    // `.rs` is a text kind in the default map (not a skip); `.mp4` is not
-    // in the map at all.
+    // `.rs` is a text kind in the default map (not a skip); `.xyz` is not
+    // in the map at all (`.mp4` became `Video` in the video milestone).
     std::fs::write(root.join("code.rs"), "fn x() {}").unwrap();
-    std::fs::write(root.join("clip.mp4"), "x").unwrap();
+    std::fs::write(root.join("clip.xyz"), "x").unwrap();
     let ev = walk_one(&root);
     assert!(ev.iter().any(|e| matches!(
         e,
-        WalkEvent::Skip { path, reason: SkipReason::UnsupportedExt } if path.ends_with("clip.mp4")
+        WalkEvent::Skip { path, reason: SkipReason::UnsupportedExt } if path.ends_with("clip.xyz")
     )));
     assert!(
         ev.iter()

@@ -48,23 +48,26 @@ macro_rules! spec_enum {
 
 spec_enum! {
     /// File kinds. v1 indexes `text`, `image`, and `pdf`; the audio
-    /// milestone adds `audio`.
+    /// milestone adds `audio`, the video milestone adds `video`.
     FileKind {
         Text => "text",
         Image => "image",
         Pdf => "pdf",
         Audio => "audio",
+        Video => "video",
     }
 }
 
 spec_enum! {
     /// Chunk kinds. The audio milestone adds `audio_segment` (one row per
-    /// ~30s clip, vec-only like images).
+    /// ~30s clip, vec-only like images); the video milestone adds
+    /// `video_segment` (one row per ~10s clip).
     ChunkKind {
         Text => "text",
         Image => "image",
         PdfPage => "pdf_page",
         AudioSegment => "audio_segment",
+        VideoSegment => "video_segment",
     }
 }
 
@@ -142,13 +145,13 @@ mod tests {
 
     #[test]
     fn from_str_round_trips() {
-        for s in ["text", "image", "pdf", "audio"] {
+        for s in ["text", "image", "pdf", "audio", "video"] {
             assert_eq!(FileKind::from_str(s).unwrap().to_string(), s);
         }
         for s in ["llama_server", "litert_lm", "sglang", "openai"] {
             assert_eq!(Backend::from_str(s).unwrap().to_string(), s);
         }
-        assert!(FileKind::from_str("video").is_err());
+        assert!(FileKind::from_str("archive").is_err());
         assert!(Backend::from_str("ollama").is_err());
     }
 }

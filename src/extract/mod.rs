@@ -9,6 +9,7 @@ pub mod audio;
 pub mod image;
 pub mod pdf;
 pub mod text;
+pub mod video;
 
 /// What the indexer does with an extracted chunk (spec §4.1–4.2).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -31,7 +32,8 @@ pub struct Chunk {
     pub end_byte: Option<i64>,
     pub page: Option<i64>,
     pub embed: EmbedDecision,
-    /// Segment timestamps in milliseconds (audio only; `None` otherwise).
+    /// Segment timestamps in milliseconds (audio/video segments;
+    /// `None` otherwise).
     pub t_start_ms: Option<i64>,
     pub t_end_ms: Option<i64>,
     /// PNG bytes for image chunks (and Task 15 PDF pages), WAV bytes for

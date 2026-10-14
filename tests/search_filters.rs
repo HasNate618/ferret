@@ -365,3 +365,82 @@ fn kind_audio_returns_only_audio() {
         vec!["/x/doc.txt".to_string()]
     );
 }
+
+fn add_video_file(h: &Harness, path: &str, t_start_ms: i64, t_end_ms: i64) {
+    let ext = path.rsplit('.').next().unwrap_or("");
+    let tx = h.store.begin().unwrap();
+    let file_id = h
+        .store
+        .upsert_file(&NewFile {
+            path: path.into(),
+            collection: "c".into(),
+            kind: FileKind::Video,
+            ext: ext.into(),
+            size: 1,
+            mtime: MTIME,
+            fingerprint: "fp".into(),
+            complete: true,
+            next_page: None,
+            skip_reason: None,
+            indexed_at: 1,
+            error: None,
+        })
+        .unwrap();
+    let chunk_id = h
+        .store
+        .insert_chunk(
+            &tx,
+            NewChunk {
+                file_id,
+                ordinal: 0,
+                page: None,
+                kind: ChunkKind::VideoSegment,
+                text: None,
+                start_byte: None,
+                end_byte: None,
+                t_start_ms: Some(t_start_ms),
+                t_end_ms: Some(t_end_ms),
+            },
+        )
+        .unwrap();
+    let embedding = h
+        .fake
+        .embed(EmbedInput::Video {
+            mp4_bytes: vec![9; 100],
+        })
+        .unwrap();
+    h.store
+        .insert_vec(&tx, chunk_id, &embedding, FileKind::Video, ext, MTIME, "c")
+        .unwrap();
+    tx.commit().unwrap();
+}
+
+#[test]
+fn kind_video_returns_only_video() {
+    let h = harness();
+    add_file(
+        &h,
+        "/x/doc.txt",
+        FileKind::Text,
+        ChunkKind::Text,
+        Some("test footage text"),
+        None,
+    );
+    add_video_file(&h, "/x/clip.mp4", 0, 10000);
+    let video_flags = FilterFlags {
+        kind: vec![FileKind::Video],
+        ..Default::default()
+    };
+    assert_eq!(
+        search(&h, "test footage", &video_flags),
+        vec!["/x/clip.mp4".to_string()]
+    );
+    let text_flags = FilterFlags {
+        kind: vec![FileKind::Text],
+        ..Default::default()
+    };
+    assert_eq!(
+        search(&h, "test footage", &text_flags),
+        vec!["/x/doc.txt".to_string()]
+    );
+}

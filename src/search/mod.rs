@@ -309,17 +309,21 @@ fn load_hit(
             };
             (snippet, spans)
         }
-        // Audio segments timestamp the basename (`t_end` missing renders
+        // Audio/video segments timestamp the basename (`t_end` missing renders
         // `?`, never panics); everything else textless is bare basename.
-        None if chunk_kind_parsed == ChunkKind::AudioSegment => (
-            format!(
-                "[{}–{}] {}",
-                t_start_ms.map(fmt_ts).unwrap_or_else(|| "?".into()),
-                t_end_ms.map(fmt_ts).unwrap_or_else(|| "?".into()),
-                basename(&path),
-            ),
-            Vec::new(),
-        ),
+        None if chunk_kind_parsed == ChunkKind::AudioSegment
+            || chunk_kind_parsed == ChunkKind::VideoSegment =>
+        {
+            (
+                format!(
+                    "[{}–{}] {}",
+                    t_start_ms.map(fmt_ts).unwrap_or_else(|| "?".into()),
+                    t_end_ms.map(fmt_ts).unwrap_or_else(|| "?".into()),
+                    basename(&path),
+                ),
+                Vec::new(),
+            )
+        }
         None => (basename(&path), Vec::new()),
     };
 

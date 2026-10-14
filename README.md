@@ -69,12 +69,12 @@ verbatim. It never shuts the child down. Health is
 
 ### Backends
 
-| `embedder.backend` | Images | Audio | Notes |
-|---|---|---|---|
-| `llama_server` (default) | yes, with `--mmproj` | yes, with `--mmproj` | v1 default |
-| `litert_lm` | yes, if probe succeeds | **no** (unconfirmed over HTTP) | same HTTP as llama_server |
-| `sglang` | yes | **no** (needs native `/encode`) | `{text, image}` items, `<\|image\|>` marker |
-| `openai` | **no** | **no** | text-only; image/audio files skip, PDF pages embed as text |
+| `embedder.backend` | Images | Audio | Video | Notes |
+|---|---|---|---|---|
+| `llama_server` (default) | yes, with `--mmproj` | yes, with `--mmproj` | yes, with `--mmproj` | v1 default |
+| `litert_lm` | yes, if probe succeeds | **no** (unconfirmed over HTTP) | **no** (unconfirmed over HTTP) | same HTTP as llama_server |
+| `sglang` | yes | **no** (needs native `/encode`) | **no** (unconfirmed) | `{text, image}` items, `<\|image\|>` marker |
+| `openai` | **no** | **no** | **no** | text-only; image/audio/video files skip, PDF pages embed as text |
 
 Non-local backends **upload** your file bytes. `ferret init` and
 `ferret index` print a stderr warning when the merged backend is
@@ -97,6 +97,29 @@ Requirements: `ffmpeg` + `ffprobe` on `PATH` (or
 typed-items `/v1/embed` dialect is a later milestone). Without
 ffmpeg, audio files walk-skip (`reason=no_ffmpeg`); without audio
 support, they persist a `no_audio_backend` skip row.
+
+## Video
+
+Video files (`.mp4 .mkv .webm .mov .avi .m4v`) index as one vector
+row per ~10s segment (`chunk.video.segment_secs`, default 10), no
+transcription: segments are cut with `ffmpeg` to H.264 MP4 clips
+(640px wide, muxed audio travels inside), embedded through the
+model's native video encoder (Appendix B.7), and searchable with
+plain text queries. Hits carry `[mm:ss–mm:ss]` stamps in `snippet`
+and `chunk_kind: "video_segment"`.
+
+The 10s default is a frame budget, not a round number: ~140
+tokens/frame with a ~58-frame per-input cap at the server frame rate
+means 10s at 4fps (~40 frames) fits while 30s would silently lose
+tail frames to server-side truncation.
+
+Requirements: `ffmpeg` + `ffprobe` on `PATH` (or
+`extract.ffmpeg_dir`), and the `llama_server` backend with `--mmproj`
+— the only backend that embeds video (`openai`/`sglang`/`litert_lm`
+refuse; the lab wrapper rejects video outright). Without ffmpeg,
+video files walk-skip (`reason=no_ffmpeg`); without video support,
+they persist a `no_video_backend` skip row. No separate audio chunks
+are created for video files.
 
 ## CLI
 
@@ -127,7 +150,7 @@ totals line; parsers MUST ignore unknown `event` values), and a final
 line with the same counters as the stderr human summary (with `--json`
 the event replaces that stderr line, which is suppressed). Statuses: `ok`, `skip` (with `reason`: `unsupported_ext`,
 `skip_rule`, `no_image_backend`, `heic_skip`, `no_magick`,
-`no_ffmpeg`, `no_audio_backend`,
+`no_ffmpeg`, `no_audio_backend`, `no_video_backend`,
 `gitignore`, `include_globs`), `error` (with message; the DB row is
 `complete=0`, walk continues).
 
@@ -173,7 +196,7 @@ Field notes for client authors:
   (`browse_no_vec`: no query text, only FTS ran — incl. `--mode keyword`).
   Always present, possibly empty.
 - `page` is 1-based for PDF hits, null otherwise. `chunk_kind` is
-  `text` | `image` | `pdf_page` | `audio_segment`. The `after` / `before` filters render
+  `text` | `image` | `pdf_page` | `audio_segment` | `video_segment`. The `after` / `before` filters render
   as unix timestamps (`i64`).
 - No `QUERY` + piped stdin reads one line (never prompts). A bare
   filter with no query text lists matching files (`hybrid` skips the
@@ -282,6 +305,6 @@ Writes `/etc/ferret/config.toml`. No daemon — ferret is a CLI; run
 
 ## Scope (v1 non-goals)
 
-No watcher, GUI, video, audio queries, OCR, docx/odt/decks, in-process model,
+No watcher, GUI, video queries, audio queries, OCR, docx/odt/decks, in-process model,
 vendored weights, or Ollama backend. See `docs/specs/ferret-design.md`
 for the full design and `docs/plans/ferret-v1.md` for the build plan.

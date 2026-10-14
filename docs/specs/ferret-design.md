@@ -6,7 +6,7 @@
 
 Ferret is a Linux and macOS CLI for local multimodal semantic search over files the user chooses. Packaging is **Nix-first**. It embeds nothing itself. EmbeddingGemma 2 (or a compatible HTTP embeddings API) lives in another process. Quickshell, fzf, and agents are clients of `ferret search --json`.
 
-This spec is v1 only. Audio, video, a watcher, a GUI, and an in-process model runner are explicitly out of scope. AUR, deb, and Homebrew casks wait until the binary exists.
+This spec is v1 only. A watcher, a GUI, and an in-process model runner are explicitly out of scope. AUR, deb, and Homebrew casks wait until the binary exists.
 
 ---
 
@@ -25,7 +25,7 @@ Success for v1: `ferret search --json 'the clause about pets in the lease' --kin
 ### 1.1 Non-goals (v1)
 
 - Hosting or bundling EmbeddingGemma 2, llama.cpp, LiteRT, or PyTorch.
-- Audio queries (searching *by* a sound clip); video of any kind. File kinds are `text|image|pdf|audio`; chunk kinds are `text|image|pdf_page|audio_segment`.
+- Audio/video queries (searching *by* a sound clip or video clip). File kinds are `text|image|pdf|audio|video`; chunk kinds are `text|image|pdf_page|audio_segment|video_segment`.
 - A menubar/GUI, Quickshell QML in-tree, or a long-running ferret daemon/socket.
 - `inotify` watch / incremental daemon (`watch` is post-v1).
 - DigUp-style isolated code index, OCR, Office/LibreOffice decks, docx/odt readers.
@@ -174,12 +174,13 @@ Extractors never embed. They return chunks. Index embeds each chunk.
 | `image` | `.jpg .jpeg .png .webp .gif .bmp`; `.heic .heif` only when `files.heic = "magick"` | One image chunk |
 | `pdf` | `.pdf` | One chunk per page |
 | `audio` | `.mp3 .wav .flac .ogg .opus .m4a .aac` | One chunk per ~30s segment (`chunk.audio.segment_secs`), 16kHz mono WAV (see B.6) |
+| `video` | `.mp4 .mkv .webm .mov .avi .m4v` | One chunk per ~10s segment (`chunk.video.segment_secs`), H.264 MP4 (see B.7) |
 
 Unknown extensions are **walk-skip** (no new `files` row) unless the user adds them via `[files.extension_kind]`. If that path is already in the DB, `index` **deletes** it (same as a skip-rule tombstone).
 
 HTML: strip tags and decode entities; remaining text is `text` chunks. JSON/YAML/TOML: raw UTF-8 as text (no pretty-printer).
 
-Unsupported in v1 (walk-skip, including `.docx .odt .pptx`, rasterizing `.svg`, video, archives): same as unknown extensions. `.svg` is indexed as **text** (source), never as an image. `.heic` / `.heif` are walk-skip when `files.heic = "skip"` (default).
+Unsupported in v1 (walk-skip, including `.docx .odt .pptx`, rasterizing `.svg`, archives): same as unknown extensions. `.svg` is indexed as **text** (source), never as an image. `.heic` / `.heif` are walk-skip when `files.heic = "skip"` (default).
 
 Walk order after extension typing:
 
@@ -707,7 +708,7 @@ The fake embedder is a trait impl used in tests and `FERRET_EMBEDDER=fake` for l
 6. `openai` + `sglang`/`litert_lm` HTTP profiles and capability flags (Appendix B).
 7. Freeze `search --json`; document Quickshell as an external client.
 
-Do not add watch, GUI, audio, or video before step 7 is usable.
+Do not add watch or GUI before step 7 is usable.
 
 ---
 

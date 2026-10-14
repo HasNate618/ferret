@@ -133,9 +133,6 @@ pub fn probe_audio(client: &Client, cfg: &Config) -> bool {
     }
 }
 
-/// Minimal `ftyp` box (24 bytes), opaque probe payload: mocks never
-/// decode it, and live decoding is the Task 8 gate. Shared with tests
-/// so the probe-body mock can assert the exact base64.
 /// One-frame 64x64 H.264 MP4 (2337 bytes), base64. Unlike audio WAVs
 /// and PNGs, video buffers go through the server's ffprobe demux, so the
 /// probe payload must be a VALID container — a bare `ftyp` box 500s.

@@ -78,3 +78,4 @@ Status: `pending` | `active` | `done` | `blocked` | `parked`.
 - Video Task 3: done. SPEC+QUALITY OK, no findings. Ordering deviations approved (early threading, inline B.7).
 - Video Task 4: done. SPEC PASS, QUALITY PASS. P2 notes resolved (index_pdf.rs confirmed in-commit; plan dimensions wording fixed to B.2 parity).
 - Video Task 5: done. OK with notes. 2 P2 comment fixes (stale stub comment, fast-path wording). Test-scoping deviation accepted.
+- Video Task 6: done. SPEC PASS, QUALITY PASS, no findings. Scope confirmed (mod.rs + 2 test files).

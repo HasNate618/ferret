@@ -1003,10 +1003,13 @@ The base64 MP4 part (H.264 clip with muxed audio, produced by
 video takes no prefix (model rule — prefixes are text-only), so
 `prefix_profile` is ignored. Like B.2, no `dimensions` key.
 
-Frame budget (do not re-derive): ~140 tokens/frame, ~58 frames max
-per input at the server's `--video-fps` (default 4fps). The default
-`segment_secs = 10` (~40 frames) stays inside the budget; longer
-segments would silently lose tail frames to server-side truncation.
+Frame budget (measured 2026-10-14, do not re-derive): a 10s 640px clip
+at the server's default 4fps (40 frames) costs ~12.6k tokens, i.e.
+~315 tokens/frame — tokens scale with frames AND resolution, so size
+batches accordingly (`-ub` ≥ 13k for 10s segments) or lower
+`--video-fps` (1fps ≈ 3.2k tokens/10s, accepted for the live gate).
+`segment_secs = 10` keeps clips manageable; longer segments multiply
+the token cost linearly.
 
 ```json
 {

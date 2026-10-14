@@ -108,10 +108,9 @@ model's native video encoder (Appendix B.7), and searchable with
 plain text queries. Hits carry `[mm:ss–mm:ss]` stamps in `snippet`
 and `chunk_kind: "video_segment"`.
 
-The 10s default is a frame budget, not a round number: ~140
-tokens/frame with a ~58-frame per-input cap at the server frame rate
-means 10s at 4fps (~40 frames) fits while 30s would silently lose
-tail frames to server-side truncation.
+The 10s default keeps clips manageable (measured: ~12.6k tokens
+per 10s 640px clip at 4fps — size server batches accordingly or
+lower `--video-fps`; see Appendix B.7).
 
 Requirements: `ffmpeg` + `ffprobe` on `PATH` (or
 `extract.ffmpeg_dir`), and the `llama_server` backend with `--mmproj`

@@ -13,7 +13,7 @@
 - Proven wire shape only: llama_server `{"input": [{"content": [{"type": "input_video", "input_video": {"url": "data:video/mp4;base64,<b64>"}}]}]}` on `/v1/embeddings`. sglang OAI video unconfirmed, openai text-only, litert_lm unconfirmed: all refuse video inputs as per-file errors (same as audio refusals). Lab wrapper rejects video outright (`unknown input type 'video'`, probed 2026-10-13).
 - Video takes NO prefix (model rule: prefixes are text-only). `apply_prefix` returns `None` for video; `embed_llama` gets an explicit arm like `Audio`.
 - Contract extensions (minor-milestone-legal, document each): new `FileKind::Video` (`"video"`), new `ChunkKind::VideoSegment` (`"video_segment"`), new `video_pipeline` fingerprint key, new `no_video_backend` skip reason, new Appendix B.7. REUSED unchanged: `t_start_ms`/`t_end_ms` columns, `[mm:ss–mm:ss]` snippet shape, `no_ffmpeg` reason, `extract.ffmpeg_dir`.
-- Model math (do not re-derive): ~140 tokens/frame, ~58 frames max per input at the server's `--video-fps` (default 4fps → ~14.5s budget). `segment_secs = 10` default → ~40 frames, comfortable headroom under the cap. Longer segments would silently lose tail frames to server-side truncation — hence 10, not 30.
+- Model math (measured 2026-10-14): a 10s 640px clip at 4fps (40 frames) costs ~12.6k tokens (~315 tok/frame — tokens scale with frames AND resolution). `segment_secs = 10` default keeps clips manageable; size server batches accordingly (`-ub` ≥ 13k) or lower `--video-fps`.
 - A video file's muxed audio travels INSIDE the clip sent to the server; ferret creates NO separate audio chunks for video files (no double-counting, no audio-track demux).
 - Test conventions: hermetic tempdirs (`tests/common.rs`), real-ffmpeg tests gate on `find_ffmpeg(None).is_ok()` and skip otherwise (magick-gate pattern), `#[serial]` on env-touching tests, exact `json_body` httpmock asserts for the dialect.
 - Each task keeps `cargo test` green and ends in its own commit; spec + README updated in the task that changes behavior.
@@ -186,7 +186,7 @@ git commit -m "feat: video segmentation into timestamped mp4 clip chunks"
 
 **Interfaces:**
 - Consumes: `probe_audio` as the template; `images_supported` meta as the accessor template; EXISTING `t_start_ms/t_end_ms` columns (verify with a comment, no migration code).
-- Produces: `probe_video(client, cfg) -> bool`: POSTs a minimal synthetic payload (arbitrary bytes — httpmock never decodes; live decoding is the Task 8 gate) as `input_video` to the llama endpoint; true on 200 + 768-d finite vector, false otherwise; non-llama backends false without dialing (mirror the probe gate). `video_supported` meta set per run (mirror `audio_supported`).
+- Produces: `probe_video(client, cfg) -> bool`: POSTs a minimal VALID mp4 (1-frame 64x64 H.264, `PROBE_MP4_BASE64` constant — video buffers go through the server's ffprobe demux, so arbitrary bytes 500; unlike WAV/PNG payloads the probe must be a real container) as `input_video` to the llama endpoint; true on 200 + 768-d finite vector, false otherwise; non-llama backends false without dialing (mirror the probe gate). `video_supported` meta set per run (mirror `audio_supported`).
 
 - [ ] **Step 1: Write the failing tests**
 

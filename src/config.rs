@@ -130,9 +130,9 @@ pub struct AudioChunkConfig {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct VideoChunkConfig {
-    /// Clip length in seconds; each segment embeds as one vector (~140
-    /// tokens/frame at the server frame rate, so 10s at 4fps ≈ 40 frames,
-    /// inside the ~58-frame per-input budget).
+    /// Clip length in seconds; each segment embeds as one vector
+    /// (measured ~315 tokens/frame at 640px — size server batches
+    /// accordingly or lower `--video-fps`; see Appendix B.7).
     pub segment_secs: u64,
 }
 

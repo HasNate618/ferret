@@ -76,3 +76,4 @@ Status: `pending` | `active` | `done` | `blocked` | `parked`.
 - Video Task 1: done. SPEC+QUALITY OK with notes, 1 P2 fixed (spec 326 video_pipeline).
 - Video Task 2: done. SPEC PASS, QUALITY PASS. 3 P2s fixed (image_bytes doc, plan cache layout, fixture verified 25.0s).
 - Video Task 3: done. SPEC+QUALITY OK, no findings. Ordering deviations approved (early threading, inline B.7).
+- Video Task 4: done. SPEC PASS, QUALITY PASS. P2 notes resolved (index_pdf.rs confirmed in-commit; plan dimensions wording fixed to B.2 parity).

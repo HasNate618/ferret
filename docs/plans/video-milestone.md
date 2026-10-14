@@ -241,7 +241,7 @@ git commit -m "feat: video probe and video_supported meta"
 
 **Interfaces:**
 - Consumes: Task 2 clip bytes; `post_with_retries` + `truncate_or_check` helpers; `Error::file` convention.
-- Produces: `EmbedInput::Video { mp4_bytes: Vec<u8> }`; llama posts `{"input": [{"content": [{"type": "input_video", "input_video": {"url": "data:video/mp4;base64,<b64>"}}]}]}` (+ `dimensions` iff != 768, mirroring audio/image arms); openai → `Error::file("backend `openai` cannot embed video")`; sglang → `Error::file` (unconfirmed over OAI HTTP); litert_lm → `Error::file` (unconfirmed over HTTP). B.7 documents the body + refusals + no-prefix rule + the frame-budget math that justifies `segment_secs = 10`.
+- Produces: `EmbedInput::Video { mp4_bytes: Vec<u8> }`; llama posts `{"input": [{"content": [{"type": "input_video", "input_video": {"url": "data:video/mp4;base64,<b64>"}}]}]}` (no `dimensions` key — B.2 parity, like the image/audio bodies); openai → `Error::file("backend `openai` cannot embed video")`; sglang → `Error::file` (unconfirmed over OAI HTTP); litert_lm → `Error::file` (unconfirmed over HTTP). B.7 documents the body + refusals + no-prefix rule + the frame-budget math that justifies `segment_secs = 10`.
 
 - [ ] **Step 1: Write the failing tests**
 

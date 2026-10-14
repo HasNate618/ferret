@@ -791,3 +791,59 @@ fn sglang_and_litert_audio_are_file_errors_without_posting() {
         mock.assert_hits(0);
     }
 }
+
+#[test]
+fn probe_video_true_on_768d_response() {
+    use base64::Engine as _;
+    use ferret::embedder::probe::{probe_mp4, probe_video};
+    let server = httpmock::MockServer::start();
+    let data = base64::engine::general_purpose::STANDARD.encode(probe_mp4());
+    let mock = server.mock(|when, then| {
+        when.method("POST")
+            .path("/v1/embeddings")
+            .json_body(serde_json::json!({
+                "model": "embeddinggemma-2",
+                "encoding_format": "float",
+                "input": [{ "content": [{ "type": "input_video",
+                    "input_video": { "url": format!("data:video/mp4;base64,{data}") } }] }]
+            }));
+        then.status(200).json_body(serde_json::json!({
+            "data": [{ "embedding": vec![0.1; 768] }]
+        }));
+    });
+    let cfg = test_cfg(&server.base_url());
+    let client = reqwest::blocking::Client::new();
+    assert!(probe_video(&client, &cfg));
+    mock.assert();
+}
+
+#[test]
+fn probe_video_false_on_400() {
+    use ferret::embedder::probe::probe_video;
+    let server = httpmock::MockServer::start();
+    let mock = server.mock(|when, then| {
+        when.method("POST").path("/v1/embeddings");
+        then.status(400).body("no video here");
+    });
+    let cfg = test_cfg(&server.base_url());
+    let client = reqwest::blocking::Client::new();
+    assert!(!probe_video(&client, &cfg));
+    mock.assert();
+}
+
+#[test]
+fn probe_video_false_without_posting_for_openai() {
+    use ferret::embedder::probe::probe_video;
+    let server = httpmock::MockServer::start();
+    let mock = server.mock(|when, then| {
+        when.method("POST").path("/v1/embeddings");
+        then.status(200).json_body(serde_json::json!({
+            "data": [{ "embedding": vec![0.1; 768] }]
+        }));
+    });
+    let mut cfg = test_cfg(&server.base_url());
+    cfg.embedder.backend = ferret::types::Backend::Openai;
+    let client = reqwest::blocking::Client::new();
+    assert!(!probe_video(&client, &cfg));
+    mock.assert_hits(0);
+}

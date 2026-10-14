@@ -460,3 +460,19 @@ fn audio_without_audio_backend_is_capability_skip() {
         .unwrap();
     assert_eq!(n, 0);
 }
+
+#[test]
+#[serial_test::serial]
+fn video_supported_meta_recorded_with_fake() {
+    let env = common::test_env();
+    try_run(&["ferret", "index"]).unwrap();
+    let conn = rusqlite::Connection::open(&env.index).unwrap();
+    let v: String = conn
+        .query_row(
+            "SELECT value FROM meta WHERE key = 'video_supported'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(v, "true");
+}

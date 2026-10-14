@@ -240,7 +240,7 @@ impl Store {
     }
 
     fn write_initial_meta(&self, cfg: &Config, images_supported: bool) -> Result<()> {
-        let entries: [(&str, String); 10] = [
+        let entries: [(&str, String); 11] = [
             ("schema_version", "1".to_string()),
             ("model_id", cfg.embedder.model.clone()),
             ("dimensions", cfg.embedder.dimensions.to_string()),
@@ -262,6 +262,8 @@ impl Store {
             // No probe at open (that would dial on every search): Task 6's
             // index run records the probed value.
             ("audio_supported", "false".to_string()),
+            // Same for video (video milestone Task 3): probed per run.
+            ("video_supported", "false".to_string()),
         ];
         for (key, value) in entries {
             self.conn.execute(

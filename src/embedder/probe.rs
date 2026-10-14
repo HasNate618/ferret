@@ -133,7 +133,50 @@ pub fn probe_audio(client: &Client, cfg: &Config) -> bool {
     }
 }
 
-/// POST URL for `cfg`, tolerating a trailing slash on the endpoint.
+/// Minimal `ftyp` box (24 bytes), opaque probe payload: mocks never
+/// decode it, and live decoding is the Task 8 gate. Shared with tests
+/// so the probe-body mock can assert the exact base64.
+pub fn probe_mp4() -> Vec<u8> {
+    let mut mp4 = Vec::with_capacity(24);
+    mp4.extend_from_slice(&20u32.to_be_bytes());
+    mp4.extend_from_slice(b"ftyp");
+    mp4.extend_from_slice(b"isom");
+    mp4.extend_from_slice(&0u32.to_be_bytes());
+    mp4.extend_from_slice(b"isom");
+    mp4
+}
+
+/// Video capability probe: POSTs the [`probe_mp4`] bytes as a llama
+/// `input_video` part (Appendix B.7 body, inline until Task 4 extracts
+/// the shared `video_body` builder). True only on 200 + a 768-d finite
+/// embedding. Non-llama backends refuse video (Task 4) and return
+/// false without dialing.
+pub fn probe_video(client: &Client, cfg: &Config) -> bool {
+    use base64::Engine as _;
+    if cfg.embedder.backend != crate::types::Backend::LlamaServer {
+        return false;
+    }
+    let data = base64::engine::general_purpose::STANDARD.encode(probe_mp4());
+    let body = serde_json::json!({
+        "model": cfg.embedder.model,
+        "encoding_format": "float",
+        "input": [{ "content": [{ "type": "input_video",
+            "input_video": { "url": format!("data:video/mp4;base64,{data}") } }] }],
+    });
+    let resp = authed(client.post(embeddings_url(cfg)), cfg)
+        .json(&body)
+        .send();
+    match resp {
+        Ok(r) if r.status().is_success() => r.json::<serde_json::Value>().is_ok_and(|v| {
+            v.pointer("/data/0/embedding")
+                .and_then(|e| e.as_array())
+                .is_some_and(|a| {
+                    a.len() == 768 && a.iter().all(|v| v.as_f64().is_some_and(|f| f.is_finite()))
+                })
+        }),
+        _ => false,
+    }
+}
 pub fn embeddings_url(cfg: &Config) -> String {
     format!("{}/v1/embeddings", base_url(cfg))
 }

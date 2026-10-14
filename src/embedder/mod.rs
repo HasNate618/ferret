@@ -49,6 +49,10 @@ pub trait Embedder: Send + Sync {
     fn audio_supported(&self) -> bool {
         false
     }
+    /// Video capability, probed lazily by HTTP backends (default: none).
+    fn video_supported(&self) -> bool {
+        false
+    }
 }
 
 /// Build the embedder for the merged config. `FERRET_EMBEDDER=fake` wins over

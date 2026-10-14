@@ -58,6 +58,8 @@ pub fn run(
     // Audio probe dials once (cached); other backends refuse without
     // dialing. Recorded per run like `images_supported`.
     let audio_supported = embedder.audio_supported();
+    // Same for video (video milestone Task 3).
+    let video_supported = embedder.video_supported();
     let store = store::open(&cfg.index.path, cfg, images_supported)?;
     let config_fp = fingerprint::config_fingerprint(cfg, images_supported);
 
@@ -134,6 +136,7 @@ pub fn run(
                 &config_fp,
                 images_supported,
                 audio_supported,
+                video_supported,
                 &dirs.cache_dir,
                 EventSink {
                     json: json_ndjson,
@@ -177,6 +180,7 @@ pub fn run(
         &fingerprint::image_pipeline_json(cfg, images_supported),
     )?;
     store.set_meta("audio_pipeline", &fingerprint::audio_pipeline_json(cfg))?;
+    store.set_meta("video_pipeline", &fingerprint::video_pipeline_json(cfg))?;
     store.set_meta(
         "images_supported",
         if images_supported { "true" } else { "false" },
@@ -184,6 +188,10 @@ pub fn run(
     store.set_meta(
         "audio_supported",
         if audio_supported { "true" } else { "false" },
+    )?;
+    store.set_meta(
+        "video_supported",
+        if video_supported { "true" } else { "false" },
     )?;
 
     if strict && summary.errors > 0 {
@@ -1035,6 +1043,9 @@ fn index_file(
     config_fp: &str,
     images_supported: bool,
     audio_supported: bool,
+    // Video milestone Task 3: threaded now, consumed by the Task 5
+    // capability skip.
+    _video_supported: bool,
     cache_dir: &Path,
     mut sink: EventSink<'_>,
     path: PathBuf,

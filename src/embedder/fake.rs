@@ -72,4 +72,8 @@ impl Embedder for FakeEmbedder {
     fn audio_supported(&self) -> bool {
         true
     }
+
+    fn video_supported(&self) -> bool {
+        true
+    }
 }

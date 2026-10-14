@@ -316,10 +316,12 @@ impl Walker<'_> {
                 return Ok(());
             }
         };
-        // NoFfmpeg gate: audio files with no ffmpeg/ffprobe resolvable
+        // NoFfmpeg gate: audio/video files with no ffmpeg/ffprobe resolvable
         // (explicit `extract.ffmpeg_dir` or PATH). Decided here, like the
         // NoMagick gate, so the indexer never sees them.
-        if kind == FileKind::Audio && crate::extract::audio::find_ffmpeg(self.ffmpeg_dir).is_err() {
+        if matches!(kind, FileKind::Audio | FileKind::Video)
+            && crate::extract::audio::find_ffmpeg(self.ffmpeg_dir).is_err()
+        {
             self.skip(path, SkipReason::NoFfmpeg);
             return Ok(());
         }

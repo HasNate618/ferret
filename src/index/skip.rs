@@ -22,6 +22,8 @@ pub enum SkipReason {
     Gitignore,
     /// Audio file no backend can embed (capability probe said no audio).
     NoAudioBackend,
+    /// Video file no backend can embed (capability probe said no video).
+    NoVideoBackend,
     /// A non-empty `include_globs` and the relative path matched none.
     IncludeGlobs,
 }
@@ -38,6 +40,7 @@ impl SkipReason {
             Self::NoFfmpeg => "no_ffmpeg",
             Self::Gitignore => "gitignore",
             Self::NoAudioBackend => "no_audio_backend",
+            Self::NoVideoBackend => "no_video_backend",
             Self::IncludeGlobs => "include_globs",
         }
     }

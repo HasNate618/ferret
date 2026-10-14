@@ -1043,9 +1043,7 @@ fn index_file(
     config_fp: &str,
     images_supported: bool,
     audio_supported: bool,
-    // Video milestone Task 3: threaded now, consumed by the Task 5
-    // capability skip.
-    _video_supported: bool,
+    video_supported: bool,
     cache_dir: &Path,
     mut sink: EventSink<'_>,
     path: PathBuf,
@@ -1118,6 +1116,23 @@ fn index_file(
             mtime,
             &file_fp,
             SkipReason::NoAudioBackend,
+            summary,
+        )?;
+        return Ok(());
+    }
+    if kind == FileKind::Video && !video_supported {
+        record_capability_skip(
+            store,
+            &mut sink,
+            &path,
+            &path_str,
+            &collection,
+            kind,
+            &ext,
+            size,
+            mtime,
+            &file_fp,
+            SkipReason::NoVideoBackend,
             summary,
         )?;
         return Ok(());
@@ -1231,18 +1246,29 @@ fn index_file(
         // Video milestone Task 1: the arm must exist for exhaustiveness.
         // Task 5 replaces this stub with extract_video dispatch.
         FileKind::Video => {
-            record_extract_error(
-                store,
-                &mut sink,
+            let ffmpeg_dir = walk::ffmpeg_dir_opt(&cfg.extract);
+            match extract::video::extract_video(
                 &path,
-                &collection,
-                kind,
-                &ext,
-                config_fp,
-                Error::file("video indexing not wired yet (video milestone Task 5)"),
-                summary,
-            )?;
-            return Ok(());
+                cfg.chunk.video.segment_secs,
+                cache_dir,
+                ffmpeg_dir,
+            ) {
+                Ok(chunks) => chunks,
+                Err(e) => {
+                    record_extract_error(
+                        store,
+                        &mut sink,
+                        &path,
+                        &collection,
+                        kind,
+                        &ext,
+                        config_fp,
+                        e,
+                        summary,
+                    )?;
+                    return Ok(());
+                }
+            }
         }
     };
 
@@ -1280,6 +1306,18 @@ fn index_file(
                 None => {
                     return Err(Error::fatal(format!(
                         "audio chunk for {} has no WAV bytes",
+                        path.display()
+                    )));
+                }
+            }
+        } else if c.kind == crate::types::ChunkKind::VideoSegment {
+            match &c.image_bytes {
+                Some(bytes) => inputs.push(EmbedInput::Video {
+                    mp4_bytes: bytes.clone(),
+                }),
+                None => {
+                    return Err(Error::fatal(format!(
+                        "video chunk for {} has no MP4 bytes",
                         path.display()
                     )));
                 }

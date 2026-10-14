@@ -399,3 +399,24 @@ fn audio_with_explicit_ffmpeg_dir_walks_despite_empty_path() {
         }
     )));
 }
+
+#[test]
+#[serial]
+fn video_without_ffmpeg_is_no_ffmpeg_skip() {
+    use common::EnvGuard;
+    // Empty PATH: no ffmpeg/ffprobe resolvable, so the mp4 walk-skips
+    // instead of erroring (whatever the host has installed).
+    let tmp = tempfile::tempdir().unwrap();
+    let empty = tmp.path().join("empty");
+    std::fs::create_dir_all(&empty).unwrap();
+    let root = tmp.path().join("c");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join("clip.mp4"), "ftyp").unwrap();
+    let _path = EnvGuard::set("PATH", empty.to_str().unwrap());
+    let ev = walk(&[root_entry(&root)], &[], &files_cfg(), false, false, None).unwrap();
+    assert!(ev.iter().any(|e| matches!(
+        e,
+        WalkEvent::Skip { reason: SkipReason::NoFfmpeg, path } if path.ends_with("clip.mp4")
+    )));
+    assert!(!ev.iter().any(|e| matches!(e, WalkEvent::File { .. })));
+}

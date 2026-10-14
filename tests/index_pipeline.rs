@@ -476,3 +476,93 @@ fn video_supported_meta_recorded_with_fake() {
         .unwrap();
     assert_eq!(v, "true");
 }
+
+#[test]
+#[serial_test::serial]
+fn video_indexes_segments_with_fake_embedder() {
+    use ferret::extract::audio::find_ffmpeg;
+    if find_ffmpeg(None).is_err() {
+        eprintln!("skip: no ffmpeg");
+        return;
+    }
+    let env = common::test_env();
+    std::fs::copy("testdata/clip.mp4", env.root.join("clip.mp4")).unwrap();
+    try_run(&["ferret", "index"]).unwrap();
+    let conn = rusqlite::Connection::open(&env.index).unwrap();
+    let n: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM chunks WHERE kind = 'video_segment'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(n, 3);
+    let ts: Vec<(Option<i64>, Option<i64>)> = conn
+        .prepare(
+            "SELECT t_start_ms, t_end_ms FROM chunks WHERE kind = 'video_segment' ORDER BY ordinal",
+        )
+        .unwrap()
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(
+        ts,
+        vec![
+            (Some(0), Some(10000)),
+            (Some(10000), Some(20000)),
+            (Some(20000), Some(25000))
+        ]
+    );
+    let nv: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM chunks_vec WHERE rowid IN (SELECT id FROM chunks WHERE kind = 'video_segment')",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(nv, 3);
+}
+
+#[test]
+#[serial_test::serial]
+fn video_without_video_backend_is_capability_skip() {
+    use common::EnvGuard;
+    use ferret::extract::audio::find_ffmpeg;
+    if find_ffmpeg(None).is_err() {
+        eprintln!("skip: no ffmpeg");
+        return;
+    }
+    // openai backend: text-only (probe short-circuits, no dial).
+    // A live /health mock keeps build_embedder's startup gate green.
+    let server = httpmock::MockServer::start();
+    let health = server.mock(|when, then| {
+        when.method("GET").path("/health");
+        then.status(200);
+    });
+    let env = common::test_env();
+    std::fs::copy("testdata/clip.mp4", env.root.join("clip.mp4")).unwrap();
+    let _not_fake = EnvGuard::set("FERRET_EMBEDDER", "http");
+    let _endpoint = EnvGuard::set("FERRET__EMBEDDER__ENDPOINT", &server.base_url());
+    let _backend = EnvGuard::set("FERRET__EMBEDDER__BACKEND", "openai");
+    try_run(&["ferret", "index"]).unwrap();
+    health.assert();
+    let conn = rusqlite::Connection::open(&env.index).unwrap();
+    let (complete, reason): (bool, Option<String>) = conn
+        .query_row(
+            "SELECT complete, skip_reason FROM files WHERE path LIKE '%clip.mp4'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert!(complete);
+    assert_eq!(reason.as_deref(), Some("no_video_backend"));
+    let n: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM chunks WHERE kind = 'video_segment'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(n, 0);
+}

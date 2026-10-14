@@ -994,3 +994,38 @@ embed audio (text-only endpoint); `sglang` cannot embed audio over
 `/v1/embeddings` (a native `/encode` endpoint is a later milestone);
 `litert_lm` cannot embed audio over HTTP (unconfirmed). The
 `probe_audio` capability check speaks this same body.
+
+### B.7 `llama_server` — video segment (`Video`)
+
+The base64 MP4 part (H.264 clip with muxed audio, produced by
+`extract_video`) is the whole input. **No text prefix of any kind**:
+video takes no prefix (model rule — prefixes are text-only), so
+`prefix_profile` is ignored. Like B.2, no `dimensions` key.
+
+Frame budget (do not re-derive): ~140 tokens/frame, ~58 frames max
+per input at the server's `--video-fps` (default 4fps). The default
+`segment_secs = 10` (~40 frames) stays inside the budget; longer
+segments would silently lose tail frames to server-side truncation.
+
+```json
+{
+  "model": "embeddinggemma-2",
+  "encoding_format": "float",
+  "input": [
+    {
+      "content": [
+        {
+          "type": "input_video",
+          "input_video": { "url": "data:video/mp4;base64,AAAA..." }
+        }
+      ]
+    }
+  ]
+}
+```
+
+Refusal matrix (all per-file errors, never fatal): `openai` cannot
+embed video (text-only endpoint); `sglang` cannot embed video over
+`/v1/embeddings` (unconfirmed); `litert_lm` cannot embed video over
+HTTP (unconfirmed). The `probe_video` capability check speaks this
+same body.

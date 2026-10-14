@@ -147,22 +147,15 @@ pub fn probe_mp4() -> Vec<u8> {
 }
 
 /// Video capability probe: POSTs the [`probe_mp4`] bytes as a llama
-/// `input_video` part (Appendix B.7 body, inline until Task 4 extracts
-/// the shared `video_body` builder). True only on 200 + a 768-d finite
+/// `input_video` part (Appendix B.7 body, shared with the embed path
+/// via `super::http::video_body`). True only on 200 + a 768-d finite
 /// embedding. Non-llama backends refuse video (Task 4) and return
 /// false without dialing.
 pub fn probe_video(client: &Client, cfg: &Config) -> bool {
-    use base64::Engine as _;
     if cfg.embedder.backend != crate::types::Backend::LlamaServer {
         return false;
     }
-    let data = base64::engine::general_purpose::STANDARD.encode(probe_mp4());
-    let body = serde_json::json!({
-        "model": cfg.embedder.model,
-        "encoding_format": "float",
-        "input": [{ "content": [{ "type": "input_video",
-            "input_video": { "url": format!("data:video/mp4;base64,{data}") } }] }],
-    });
+    let body = super::http::video_body(cfg, &probe_mp4());
     let resp = authed(client.post(embeddings_url(cfg)), cfg)
         .json(&body)
         .send();

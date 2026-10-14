@@ -41,6 +41,7 @@ impl FakeEmbedder {
             }
             EmbedInput::Image { bytes, .. } => buf.extend_from_slice(bytes),
             EmbedInput::Audio { wav_bytes } => buf.extend_from_slice(wav_bytes),
+            EmbedInput::Video { mp4_bytes } => buf.extend_from_slice(mp4_bytes),
             EmbedInput::PdfPage { image_png, text } => {
                 buf.extend_from_slice(image_png);
                 buf.push(0x1f);

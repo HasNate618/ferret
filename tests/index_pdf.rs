@@ -307,6 +307,7 @@ impl ferret::embedder::Embedder for RecordInputs {
             ferret::embedder::EmbedInput::Document { .. } => "Doc",
             ferret::embedder::EmbedInput::Query { .. } => "Query",
             ferret::embedder::EmbedInput::Audio { .. } => "Audio",
+            ferret::embedder::EmbedInput::Video { .. } => "Video",
         };
         self.seen.lock().unwrap().push(kind.to_string());
         self.inner.embed(input)

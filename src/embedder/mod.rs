@@ -35,6 +35,9 @@ pub enum EmbedInput {
     /// One audio segment: 16kHz mono WAV bytes; no text prefix (model
     /// rule: prefixes are text-only).
     Audio { wav_bytes: Vec<u8> },
+    /// One video segment: H.264 MP4 clip bytes (muxed audio travels
+    /// inside); no text prefix (model rule: prefixes are text-only).
+    Video { mp4_bytes: Vec<u8> },
 }
 
 /// An embedding backend. Every output is a single L2-normalized vector of

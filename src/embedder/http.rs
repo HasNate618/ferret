@@ -98,6 +98,14 @@ impl HttpEmbedder {
         parse_embedding(resp)
     }
 
+    /// One video segment round-trip with retries (Appendix B.7: the
+    /// base64 MP4 part is the whole input).
+    fn post_video(&self, mp4: &[u8]) -> Result<Vec<f32>> {
+        let body = video_body(&self.cfg, mp4);
+        let resp = self.post_with_retries(&probe::embeddings_url(&self.cfg), &body)?;
+        parse_embedding(resp)
+    }
+
     /// llama_server / litert_lm text+image dialect (Appendices B.1–B.3).
     fn embed_llama(&self, input: EmbedInput) -> Result<Vec<f32>> {
         let sized = match &input {
@@ -123,6 +131,18 @@ impl HttpEmbedder {
                     ));
                 }
                 let raw = self.post_audio(wav_bytes)?;
+                truncate_or_check(raw, self.backend, self.dimensions)?
+            }
+            // Appendix B.7: the base64 MP4 part is the whole input; video
+            // takes no text prefix (model rule: prefixes are text-only).
+            // Litert over HTTP is unconfirmed for video: refuse per-file.
+            EmbedInput::Video { mp4_bytes } => {
+                if self.backend == Backend::LitertLm {
+                    return Err(Error::file(
+                        "backend `litert_lm` cannot embed video over HTTP (unconfirmed)",
+                    ));
+                }
+                let raw = self.post_video(mp4_bytes)?;
                 truncate_or_check(raw, self.backend, self.dimensions)?
             }
             _ => match apply_prefix(self.profile, &input) {
@@ -158,6 +178,9 @@ impl HttpEmbedder {
             EmbedInput::Audio { .. } => {
                 return Err(Error::file("backend `openai` cannot embed audio"));
             }
+            EmbedInput::Video { .. } => {
+                return Err(Error::file("backend `openai` cannot embed video"));
+            }
             EmbedInput::PdfPage { text, .. } => prefixed_or_empty(self.profile, text.as_deref()),
             _ => match apply_prefix(self.profile, &input) {
                 Some(t) => t,
@@ -190,6 +213,10 @@ impl HttpEmbedder {
             // `/encode` endpoint is a later milestone, not this one).
             EmbedInput::Audio { .. } => {
                 return Err(Error::file("backend `sglang` cannot embed audio"));
+            }
+            // Same for video: unconfirmed over OAI HTTP.
+            EmbedInput::Video { .. } => {
+                return Err(Error::file("backend `sglang` cannot embed video"));
             }
             EmbedInput::PdfPage { image_png, text } => {
                 let prefixed = prefixed_or_empty(self.profile, text.as_deref());
@@ -374,6 +401,21 @@ pub(crate) fn audio_body(cfg: &Config, wav: &[u8]) -> serde_json::Value {
         "encoding_format": "float",
         "input": [{ "content": [{ "type": "input_audio",
             "input_audio": { "data": data } }] }],
+    })
+}
+
+/// Frozen Appendix B.7 video body, shared by the video embed path and
+/// the capability probe: the data-URL MP4 part is the whole input, no
+/// text prefix of any kind (model rule: prefixes are text-only). Like
+/// the audio body, no `dimensions` key (parity with B.2).
+pub(crate) fn video_body(cfg: &Config, mp4: &[u8]) -> serde_json::Value {
+    use base64::Engine as _;
+    let data = base64::engine::general_purpose::STANDARD.encode(mp4);
+    json!({
+        "model": cfg.embedder.model,
+        "encoding_format": "float",
+        "input": [{ "content": [{ "type": "input_video",
+            "input_video": { "url": format!("data:video/mp4;base64,{data}") } }] }],
     })
 }
 
